@@ -1,361 +1,254 @@
-# Ethernet DHCP recovery: guarded preparation and review
+# Ethernet DHCP recovery with data and quorum guards
 
-This is a bounded P0 implementation, **not unattended HA recovery**. DHCP and mDNS remain
-supported; static addresses and reservations are not the solution. Wi-Fi failover is out of scope.
-A required systemd pre-start hook refreshes local Ethernet YAML on every K3s start.
-No timer, DHCP-event restart, cluster mutation, membership reset, database deletion,
-or automatic peer rejoin is installed by these tools.
+K-339 remains open until owner-run staging and production qualification. This implementation
+provides automatic local address refresh and an **optional, disabled-by-default recovery
+controller** for one changed server while both other voters remain healthy. It does not
+recover total quorum loss automatically. Static IP assignments, DHCP reservations and Wi-Fi
+failover are not solutions used by these tools.
 
-## Why discovery alone cannot recover embedded etcd
+No live staging or production access was used to develop this change. Disposable local etcd
+protocol tests use synthetic certificates and databases; they do not qualify K3s startup,
+Node status convergence, application availability or the deployed clusters.
+
+## Why mDNS and hostname peer URLs alone are insufficient
 
 The K3s sources for both deployed versions define `NodeIPFlag` and `FlannelIfaceFlag` without
-`EnvVars`. Consequently `K3S_NODE_IP` and `K3S_FLANNEL_IFACE` do not configure those flags:
+`EnvVars`. `K3S_NODE_IP` and `K3S_FLANNEL_IFACE` therefore do not configure those flags:
 
 - [v1.35.4+k3s1 agent flags](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/cli/cmds/agent.go)
 - [v1.34.5+k3s1 agent flags](https://github.com/k3s-io/k3s/blob/v1.34.5%2Bk3s1/pkg/cli/cmds/agent.go)
 
-Use supported YAML `node-ip` and `flannel-iface`. A YAML file does not override a conflicting
-CLI argument. Inspect the effective systemd unit, drop-ins, environment files, `K3S_URL`,
-`--server`, `--node-ip`, `--flannel-iface`, custom config paths and later YAML fragments.
-Treat missing or conflicting evidence as a stop condition, not permission to rewrite it.
+Use supported YAML `node-ip` and `flannel-iface`. A conflicting CLI option can override YAML;
+configuration precedence must be verified before enrollment.
 
-In [K3s embedded etcd](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/etcd/etcd.go),
-`peerURL()` builds an IP-based peer endpoint. Membership testing compares both the persisted
-member name and peer URL. Resolving a current `.local` address does not update that membership.
-The member URL update in the reset path is restricted to a single-member cluster; it is not
-a general multi-member DHCP repair loop. Hostname TLS SANs and join targets alone cannot fix this.
+[K3s embedded etcd](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/etcd/etcd.go)
+constructs its expected peer URL from `PrivateIP` and checks both member name and peer URL.
+Changing persisted peer URLs to hostnames does not satisfy that check. The controller keeps
+IP-based peer URLs and updates only the existing enrolled member's URL. mDNS locates the
+survivors; authenticated cluster/member IDs establish their identities.
 
-The Kubernetes Node `status.addresses` InternalIP is a separate layer. A current
-`k3s.io/internal-ip` annotation does not prove that status has converged. A stale InternalIP
-can prevent local network-controller interface lookup even after etcd starts.
+[K3s server configuration](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/cli/server/server.go)
+adds current node IPs to SANs, and its
+[certificate generator](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/daemons/control/deps/deps.go)
+regenerates certificates when required SANs change. This source behavior still requires
+qualification against both exact installed versions. The controller never edits certificates,
+WAL, snapshots, tokens or database directories.
 
-## Prepare local Ethernet settings
-
-The existing entry point remains:
+## Default preparation and every-start refresh
 
 ```bash
 sudo -E bash scripts/configure_k3s_node_ip.sh
-```
-
-It now atomically writes `config.yaml.d/20-sugarkube-network.yaml` with the current global,
-primary Ethernet IPv4 address and matching flannel interface. The default interface is `eth0`;
-set `SUGARKUBE_MDNS_INTERFACE` for a different Ethernet interface. A conflicting
-`SUGARKUBE_FLANNEL_IFACE`, Wi-Fi interface name, missing address, link-local address or failed
-address query is rejected. Repeating the same configuration does not replace the YAML file.
-Before writing the address snapshot, preparation installs a managed copy of the helper and
-required `ExecStartPre` drop-ins for both `k3s.service` and `k3s-agent.service`. On every start,
-including an ordinary reboot after a lease change, systemd refreshes the managed YAML from
-the current Ethernet address before executing K3s. This does not pin a DHCP lease. The hook
-runs after `network-online.target`, has a 30-second command timeout, and refuses startup if
-the address is missing, invalid or ambiguous, or the managed YAML is missing or replaced.
-It preserves the old file on failure; K3s cannot consume that old file through this start path.
-The installed copy is independent of the checkout. New installations load the drop-ins through
-the K3s installer; existing installations load them after an operator daemon reload or reboot.
-Preparation itself does not reload systemd. Custom unit overrides must not remove the required
-pre-start hook. Tests simulate the installed unit start sequence; live reboot qualification
-remains an owner-run gate.
-
-An installed server unit or persisted server database blocks changed network configuration
-unless the operator explicitly requests preparation after reviewing quorum and backups:
-
-```bash
+# Existing server: explicitly review quorum/backups before preparing changes.
 sudo -E bash scripts/configure_k3s_node_ip.sh --prepare-server
 ```
 
-This **only prepares files**, including on agents. It never reloads systemd, starts or restarts
-K3s. The previous automatic restart behavior is removed. `just up` explicitly stops before discovery or installation if any preparation
-step fails (including hook installation); do not bypass that guard as a recovery procedure. Configuration preparation can
-affect a later start, so coordinate it with the recovery plan. Installing or upgrading the
-pre-start hook on an existing server also requires `--prepare-server`. Boot refresh changes
-only the owned network YAML; it cannot migrate legacy files, alter TLS policy or repair etcd
-membership. A new local IP can still disagree with the persisted etcd peer URL. That failure
-requires the live-quorum repair protocol below, or explicit operator recovery without quorum.
-A lease change while K3s remains running does not itself trigger a restart. Existing CLI overrides must be
-resolved separately. Nonstandard data directories must be supplied through `K3S_DATA_DIR`.
+Before persisting a literal address, preparation installs a managed helper copy and required
+`ExecStartPre` drop-ins for `k3s.service` and `k3s-agent.service`. Every systemd start, including
+an ordinary reboot after DHCP changes, refreshes `config.yaml.d/20-sugarkube-network.yaml`
+from the current primary global Ethernet IPv4 address. The interface defaults to `eth0`;
+`SUGARKUBE_MDNS_INTERFACE` selects another Ethernet interface during preparation.
 
-Exact legacy `10-node-ip.conf` files generated by this helper are preserved as `.pre-yaml`
-backups, which systemd does not load as drop-ins. Customized files and existing backups are
-preserved for manual review. Existing TLS SAN configuration is not rewritten during network
-preparation; fresh installations retain initial TLS template setup. A local file lock prevents concurrent preparation; it is not a distributed lock.
+The pre-start command runs after `network-online.target`, has a 30-second timeout, and blocks
+K3s execution if the address is missing, invalid or ambiguous, or the managed YAML is missing
+or replaced. A failed refresh preserves the old file but does not allow K3s to consume it
+through this start path. It writes only owned network YAML; it cannot migrate legacy files,
+rewrite TLS policy or mutate membership. The installed copy does not depend on the checkout.
 
-## Review recovery evidence
+Preparation never reloads systemd or starts/restarts a service. The K3s installer loads the
+new drop-ins on a fresh installation; an existing installation loads them after an operator
+reload or reboot. Installing/upgrading the hook on an existing server requires explicit
+`--prepare-server`. `just up` stops before discovery/install if preparation fails, including
+hook installation failure. Tests cover this through the actual recipe.
 
-Run the planner against a JSON evidence bundle collected by an authorized operator:
+Exact helper-owned legacy `10-node-ip.conf` files are retained as `.pre-yaml` backups.
+Custom files and existing backups remain for operator review. Missing or contradictory
+configuration is a stop condition. Do not remove required pre-start commands in later unit
+files. The default helper alone does not repair etcd membership or trigger a running service
+restart when DHCP changes.
+
+## Opt-in automated path
+
+`scripts/ethernet_quorum_recover.py` supports only three established embedded-etcd voters,
+single-stack Ethernet IPv4, the two exact K3s versions above and the standard K3s paths.
+It rejects CLI/environment/YAML network overrides, raw-IP join targets, alternate data/config
+paths, custom server drop-ins, changed enrolled files or changed membership. Resolve these
+conditions through a separate reviewed migration before enrolling.
+
+The controller uses etcd's
+[JSON gateway](https://etcd.io/docs/v3.6/dev-guide/api_grpc_gateway/), which must be enabled.
+It pins each discovered IP to an Ethernet-bound TLS connection, verifies the enrolled DNS
+identity and CA, and checks cluster/member IDs in every response. Connections do not silently
+reconnect between proof and mutation. Quorum proof uses a linearizable read from each survivor;
+a TCP connection, mDNS answer, cached membership or API readiness is insufficient.
+
+### Enrollment while healthy
+
+Enrollment is an explicit owner operation after verified backups and a recovery drill. It
+requires all three voters healthy, current peer URLs, matching Node UIDs/member annotations,
+and converged Node addresses. It records the machine identity, original address, exact K3s
+version, effective systemd settings, YAML files, environment files and trust-root hashes. Native etcd/API client certificate
+renewal is allowed at the same protected paths; CA and configuration changes invalidate
+enrollment. Only a standard inline-certificate kubeconfig is accepted, with no exec plugins
+or token/file credential overrides.
+The original address is a baseline for detecting changes, not a static assignment.
+
+`python3-yaml` is installed by `scripts/install_deps.sh`. Standard K3s `kubectl`, Avahi,
+`ip`, systemd and Python must be available. Prepare the default boot hook first, then create
+a root-owned mode-0600 request using **verified actual decimal IDs and exact names**:
+
+```json
+{
+  "schema_version": 1,
+  "k3s_version": "v1.35.4+k3s1",
+  "interface": "eth0",
+  "cluster_id": "123456789",
+  "local_member_id": "101",
+  "verified_backup": true,
+  "members": [
+    {"id": "101", "name": "pi0-existing-member-name", "hostname": "pi0.local", "node_uid": "actual-uid-0"},
+    {"id": "102", "name": "pi1-existing-member-name", "hostname": "pi1.local", "node_uid": "actual-uid-1"},
+    {"id": "103", "name": "pi2-existing-member-name", "hostname": "pi2.local", "node_uid": "actual-uid-2"}
+  ],
+  "etcd_tls": {
+    "ca": "/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt",
+    "cert": "/var/lib/rancher/k3s/server/tls/etcd/client.crt",
+    "key": "/var/lib/rancher/k3s/server/tls/etcd/client.key"
+  },
+  "kubeconfig": "/etc/rancher/k3s/k3s.yaml"
+}
+```
+
+The values above are placeholders. Do not infer member IDs from node names or reuse IDs
+across staging and production. The backup flag is an operator attestation, not an automatic
+backup integrity check. Keep the request, enrollment and credentials out of PR logs.
+
+```bash
+sudo python3 scripts/ethernet_quorum_recover.py enroll \
+  --request /root/sugarkube-recovery-request.json
+```
+
+This installs the enrolled controller, a server pre-start/post-start drop-in, and the
+`sugarkube-ethernet-recovery.service`/`.timer` units. It **does not reload, enable or start**
+anything. Existing enrollment or hook files are refused rather than overwritten. Failed
+installation remains disabled and requires inspection before retrying. The owner must
+explicitly load and enable these units as part of the staging qualification below.
+
+### Address-change state machine
+
+1. The timer observes every 30 seconds. A new address must remain observed for at least
+   30 seconds before it acts on a running server. Boot/start recovery can act directly after
+   required address refresh. Unchanged voters may cold-start without an existing quorum;
+   otherwise an ordinary cluster power-up would deadlock.
+2. Authenticate both other enrolled voters, verify their identities and quorum, and check
+   unchanged three-member voting membership plus the local Node UID/member binding.
+3. Persist a local journal and acquire a cluster-wide incident record with etcd compare-and-swap.
+   There is no expiring lease or automatic takeover. Only one incident may own recovery.
+4. For the running-server path, refresh owned network YAML. Revalidate the address, identities,
+   quorum, configuration and membership immediately before updating only the local member's
+   peer URL. Read membership back and require exact confirmation with unchanged survivor records.
+5. Durably authorize one start. The watcher releases its local lock before queuing one local
+   `try-restart`; the pre-start hook consumes that authorization. A boot-triggered repair permits
+   the already requested start. K3s's `Restart=always` cannot replay an unfinished authorization
+   and repeatedly execute K3s. Failed pre-start jobs can still be retried by systemd.
+6. Completion requires all three voters healthy, the same local Node Ready with current
+   annotation/status InternalIP, and the same active K3s process/invocation/restart count across
+   a 30-second verification window. Only then is incident ownership released. Post-start failure
+   does not kill a healthy process; the timer can retry completion without repeating mutation.
+
+A failed/ambiguous membership RPC leaves the incident latched. No blind retry, member removal,
+member addition, identity regeneration, database replacement, reset or peer rejoin is issued.
+A second address change, lost quorum, changed identity, configuration drift or restart during
+verification stops the incident. No software can guarantee that a second independent voter
+will not fail after a successful quorum check; the response is to preserve state and stop.
+
+Manual maintenance must disable the timer and coordinate with the persistent incident owner.
+Do not delete the incident key or journal to force progress. A separate KV lock cannot
+atomically fence an unrelated membership RPC; automatic lease takeover is intentionally absent.
+
+### Stale Node status and explicit resumption
+
+The controller does not patch Node status automatically. A current `k3s.io/internal-ip`
+annotation with stale `status.addresses` can still cause the observed network-controller
+restart failure. That is a remaining limit on unattended recovery.
+
+Use the read-only planner below to review a status-subresource-only JSON Patch guarded by
+Node UID, resourceVersion and the previous addresses. Recollect evidence on a conflict.
+Preserve other address types. Never strip the patch tests or guess a Node identity.
+
+After investigation and any required guarded status repair, an operator can explicitly request
+one further start with `resume`. It verifies both survivors, ownership, current member URL,
+configuration and Node binding. It accepts converged addresses or the consistent old address
+pair before a first start; contradictory annotation/status requires reconciliation first.
+It records the operator resumption and never repeats the membership update.
+
+```bash
+sudo python3 /usr/local/libexec/sugarkube/ethernet-quorum-recover.py resume
+```
+
+This is a service-changing operator command, not a read-only diagnostic. Do not run it during
+normal observation or without reviewing the latched incident and backups. If membership does
+not match the new address, reconcile the unknown outcome explicitly before resuming.
+
+## Read-only evidence planner
 
 ```bash
 python3 scripts/ethernet_recovery_plan.py /secure/path/evidence.json
-# Optional bounded, read-only discovery on the local Ethernet network:
 python3 scripts/ethernet_recovery_plan.py --resolve-mdns /secure/path/evidence.json
 ```
 
-The optional discovery uses `avahi-resolve-host-name -4`, with a five-second timeout per
-hostname and at most three hostnames. It does not connect to Kubernetes or etcd. It preserves
-the original capture time; fresh discovery cannot make old quorum evidence fresh. Default
-operation is entirely offline. Neither mode writes the evidence file or applies a plan.
+The planner never applies changes. Optional Avahi discovery is bounded to three hostnames and
+five seconds per hostname; it preserves the capture timestamp. The evidence must be no more
+than 300 seconds old. Offline health records are operator-supplied and cannot be authenticated
+by this planner. See [regression fixtures](../tests/test_ethernet_recovery_plan.py) for the full
+schema: cluster/member IDs, three voter records, authenticated health evidence, mDNS and local
+Ethernet observations, effective join targets and captured Kubernetes Node objects.
 
-The bundle has these fields (see [regression fixtures](../tests/test_ethernet_recovery_plan.py)
-for a complete synthetic example):
+- `no-change`: no address change identified in supplied evidence; not a full health attestation.
+- `live-quorum-review`: two proven survivors permit review of a changed member's peer URL,
+  join targets and guarded status patch candidates. Candidates are not execution authorization.
+- `operator-intervention`: insufficient or contradictory evidence; no mutation candidates.
+  Failure to prove quorum does not establish permanent quorum loss.
 
-| Field | Required evidence |
-| --- | --- |
-| `schema_version` | Integer `1` |
-| `captured_at` | Timezone-qualified ISO timestamp, no more than 300 seconds old, not in the future |
-| `cluster_id` | Exact etcd cluster ID as a string; never round 64-bit IDs through floating point |
-| `members` | All three persisted members: string `id`, exact `name`, `isLearner: false`, `peerURLs` |
-| `health` | Records with string `member_id`, `cluster_id`, boolean `healthy`, `method: "authenticated-etcd-proposal"` |
-| `nodes` | Three records as described below, with one unique member and Ethernet IP per Node |
+## Total quorum loss
 
-Each node record contains `name`, string `member_id`, `mdns_name` equal to `name.local`,
-`mdns_ipv4` (a single-address list), `ethernet_ipv4`, `interface`, `join_targets` (all effective
-CLI/environment/YAML targets, or an empty list for a seed with none), and `object` (the actual
-Kubernetes Node JSON with metadata and status). Obtain the Ethernet address from that node's
-interface evidence, independently of mDNS. Obtain the persisted member name from membership
-and corroborate it with `etcd.k3s.cattle.io/node-name`; do not guess suffixes or infer identities
-from similar names. Use the Node UID and resourceVersion from the same capture.
+The controller cannot commit a peer-URL change without quorum and cannot choose the authoritative
+database. Preserve every server database, token and configuration. Make and verify cold backups.
+An operator must choose the seed and authorize any single-seed membership reset from existing
+data; preserve peer DB directories and rejoin sequentially only after seed health and membership
+are verified. No reset/deletion commands are generated by these tools. See
+[etcd runtime reconfiguration](https://etcd.io/docs/v3.6/op-guide/runtime-configuration/).
 
-Health means a successful authenticated etcd endpoint-health proposal, associated with the
-member and cluster IDs from authenticated endpoint status. TCP connectivity, a resolvable
-hostname, a cached member list, Node Ready or API readiness alone are insufficient. The planner
-validates the supplied records; it cannot authenticate an offline bundle, verify its provenance,
-or establish that quorum will still exist when an operator acts. This PR does not implement an
-authenticated evidence collector. Do not relabel weak observations as proposal health.
+## Owner-run qualification and rollout gate
 
-## Interpret the result
+**K-339 is not Done on CI success or merge.** Do not enable the controller in production on
+unit tests or disposable etcd evidence alone. The owner must record these results and accept
+the remaining limitations. Planned production downtime is allowed after staging passes;
+later second-cluster/load-balancer work is not a prerequisite.
 
-- `no-change`: the supplied evidence has no identified address changes. This is not a full
-  cluster health assessment and does not attest to effective CLI/config precedence.
-- `live-quorum-review`: at least two distinct voters have reported proposal health in the same
-  cluster. Candidates identify old versus current peer URLs and raw-IP or unknown join targets.
-  A changed member must be isolatable while leaving two healthy voters. A peer URL candidate is
-  **not** authorization to update membership; first verify peer TLS at the new address and
-  preserve data. Work on one member at a time and collect new evidence after every action.
-- `operator-intervention` (exit 2): insufficient or unsafe evidence. Lack of observed quorum
-  does not prove permanent quorum loss. No mutation candidates are emitted.
-
-A stale status candidate is a JSON Patch for the **status subresource only**, guarded by tests
-of Node UID, resourceVersion and old addresses. It preserves other address types and requires
-the K3s annotation, local Ethernet observation and mDNS result to agree. It is a last-resort
-review artifact, not an automatic status writer. A conflict means recollect evidence; never
-remove the tests or blindly retry an old patch. Membership repair and status repair are separate.
-
-For total quorum loss, stop automation. Preserve all server databases, tokens and configuration;
-make and verify cold backups before any recovery operation. An operator must choose the
-authoritative seed and authorize any single-seed membership reset from existing data. Preserve
-peer database directories and rejoin sequentially only after seed health and membership are
-verified. These tools neither select that seed nor generate reset/deletion commands.
-
-## Remaining work before unattended recovery
-
-Safe live-quorum automation still needs authenticated evidence collection, verified effective
-configuration and TLS, a cluster-wide coordinator, revalidation immediately before each mutation,
-a resumable journal, restart budgeting and integration tests against both exact K3s versions.
-A simultaneous three-server address change may remove the quorum needed to commit peer URL
-updates; mDNS cannot bypass the consensus requirement. Total quorum-loss reset remains an
-explicit operator operation even after that work. No live-cluster validation has been performed
-for this implementation.
-
-## Owner-executed validation and rollout gate (K-339)
-
-**K-339 is not Done on CI success or merge.** The owner must exercise the change in staging,
-record the results, and explicitly accept the bounded behavior before production rollout.
-The following is a proposed live validation plan, not authorization to execute it. No live
-steps were executed while preparing this PR. Full unattended recovery remains unfinished.
-
-### 1. Establish a recoverable staging baseline
-
-1. Schedule a maintenance window and secure console access independent of the affected LAN
-   address. Record all three node names, UIDs, Ethernet MACs/interfaces, current DHCP addresses,
-   exact K3s versions, etcd cluster/member IDs, peer URLs and effective CLI/env/YAML settings.
-   Confirm both supported K3s versions in staging or an isolated representative test cluster
-   before considering production on a version not yet exercised.
-2. Verify all three voters with authenticated etcd proposal health, all Nodes Ready, and
-   normal application reads/writes. Record a persistent application test marker and its content
-   digest, representative workload health and current restart counts. Record Node annotations
-   **and** status addresses separately. Do not use API readiness as the sole quorum check.
-3. Make an etcd snapshot and validate its integrity with compatible tools. Preserve the server
-   token, configuration and full database directories in protected backups. Obtain cold copies
-   with one server stopped at a time, leaving two verified healthy voters; restart and verify
-   all three voters before stopping the next. Stop if that quorum margin cannot be maintained.
-   Record checksums and verify restoration in an isolated environment that cannot contact the
-   original cluster. Keep originals intact; do not delete or replace peer DB directories.
-4. Record the operator-selected rollback strategy and time budget. Preserve pre-change files
-   and capture the exact Git commit under test. Keep credentials and database copies out of
-   public PR logs. Without verified recoverability and independent access, do not proceed.
-
-### 2. Exercise one staging member's Ethernet address change
-
-1. Select one nonessential-to-current-quorum member; keep the other two unchanged and healthy.
-   Use the router's normal DHCP mechanism to give that member a different lease, under owner
-   control. Do not introduce static assignments or reservations as the fix. Confirm the new
-   address from the node's Ethernet interface and independently via mDNS; record old/new values.
-2. Before a restart or membership write, collect fresh authenticated evidence for the two
-   unaffected voters. Run the planner with `--resolve-mdns`. Expect `live-quorum-review` and the
-   exact affected member ID/peer URL, not a replacement member or reset recommendation.
-3. Exercise a normal staging reboot after the changed lease, without manually rerunning
-   preparation. Inspect the installed pre-start result and confirm K3s reads the new local IP.
-   Membership can still block startup; do not infer etcd recovery from refreshed YAML.
-   Also test missing Ethernet addressing: pre-start failure must prevent K3s execution and
-   preserve the previous YAML and database.
-4. Run local preparation without `--prepare-server` and verify refusal leaves the previous
-   network file intact. After reviewing the plan, run explicit preparation and inspect the
-   YAML. Confirm no systemd reload, restart, database mutation or membership change occurred.
-   Inspect and resolve stale `--server`/`K3S_URL` and higher-precedence network settings manually;
-   a YAML write alone is not proof the effective settings changed.
-5. Any live membership update or service restart requires the owner's separate reviewed
-   procedure, verified current quorum, peer TLS/identity checks and preserved backups. This PR
-   does not execute those actions. Keep the same member identity and work on only that member.
-   If its recovery needs reset, removal or database replacement, stop this test and escalate.
-6. Check that the member rejoins the same cluster, all three proposal-health checks succeed,
-   peer URLs reflect current addresses, Node status/annotations converge, restart counts
-   stabilize, and application test-marker reads and new writes succeed with unchanged data.
-   Observe for an owner-chosen window long enough to detect repeated K3s restart loops.
-
-### 3. Exercise stale status, retries and failure safety
-
-- If stale InternalIP occurs naturally, capture the Node object and local interface evidence
-  before intervention. Expect a guarded status-only patch candidate only when the annotation,
-  Ethernet address and mDNS agree. Have the owner review the UID/resourceVersion tests and
-  status subresource. Recollect on conflict; verify other Node fields and address types remain
-  unchanged. If staging does not reproduce this failure, record it as **not exercised** and
-  use an isolated disposable cluster for controlled reproduction; do not corrupt production
-  Node status merely to test a patch.
-- Repeat preparation at the same IP: YAML content and modification time should remain unchanged,
-  no restart should occur, and the post-recovery planner should report `no-change`. Re-run after
-  a second controlled lease change on the same staging member to test repeatability.
-- Exercise a deliberate owner-controlled restart of that one recovered member while the other
-  two remain healthy. Verify effective YAML use, stable membership and application data after
-  restart. This is a manual validation step, not a behavior supplied by the helper.
-- With offline copies of the evidence, test missing/failed mDNS, stale timestamps, contradictory
-  Node identities, missing health, and zero/one healthy voter. Expect exit 2 or no mutation
-  candidates and no fallback reset. A real simultaneous quorum-loss drill belongs in an
-  isolated, restorable staging clone with separately approved recovery leadership. Do not
-  break the original cluster's quorum to demonstrate this tool's refusal behavior.
-- Retain before/after member lists, health results, Node objects, file checksums, application
-  marker results and relevant redacted logs. Unit tests cover atomic-write failure and local
-  lock contention; report any live failure mode that was not exercised explicitly.
-
-**Stop immediately** on loss of a second voter, cluster/member identity mismatch, unverified
-backup, ambiguous mDNS/interface evidence, TLS mismatch, unexpected database change, missing
-application data or persistent restart loops. Freeze further automation, preserve evidence and
-DBs, and use the owner's state-preserving recovery procedure. Do not repeatedly restart peers,
-reset membership, wipe data or treat an old plan as a queue of authorized actions. Restoring an
-old file does not restore etcd membership or Node status and may advertise the old IP again.
-
-### 4. Production gate and acceptance evidence
-
-After documented staging results and explicit owner approval, schedule an explicit production
-maintenance window with planned downtime allowed for the owner-executed recovery drill. Repeat
-backup and baseline checks for production. Later second-cluster and load-balancer improvements
-are not prerequisites for this P0 validation. Start with one server while two verified voters remain unchanged. Validate
-configuration preparation, effective settings, stable membership, Node status, restart behavior
-and representative workload reads/writes before proceeding to another server. A production
-DHCP-change exercise requires its own approved window; do not infer approval from the staging
-test or a merge. Preserve a rollback decision point after every server.
-
-Record the tested commit, K3s versions, date, operator, lease changes, checks, failures, recovery
-steps and unexercised cases. Production completion requires all three servers and workloads
-healthy with data preserved and owner acceptance. Keep K-339 open if live testing is outstanding
-or if its required unattended recovery behavior exceeds this PR's explicitly bounded scope.
-
-## Proposed smallest automated path: repair this host with two surviving voters
-
-**Feasibility finding:** a single changed server can potentially recover automatically while
-its other two voters remain healthy. This is different from the simultaneous three-server
-outage. The proposal below is not implemented or enabled by this PR and must pass the live
-testing gate above. The read-only planner is an intermediate deliverable, not self-healing.
-
-[etcd runtime reconfiguration](https://etcd.io/docs/v3.6/op-guide/runtime-configuration/)
-supports updating an existing member's peer URLs while a majority is functioning, followed
-by restarting that member. It requires sequential changes and describes majority/address-loss
-recovery as manual. No member removal, new identity or database replacement is needed for the
-single-member update path. This protocol capability does not by itself establish safety for
-Sugarkube's configuration, credentials, process supervision or data.
-
-Source inspection also narrows the K3s integration work: initialized members follow the existing
-WAL path in `ETCD.Start`, and the embedded executor's `CurrentETCDOptions` returns empty initial
-options. The runtime recomputes listen/client URLs from `PrivateIP`; this is not an excuse to
-edit etcd WAL or bootstrap a replacement member. See the deployed-version
-[embedded executor](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/executor/embed/embed.go)
-and [etcd implementation](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/etcd/etcd.go).
-The [certificate generator](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/daemons/control/deps/deps.go)
-uses cluster etcd client credentials and adds configured SANs to peer/server certificates.
-A trusted CA alone is not a unique member identity: verify the TLS hostname plus authenticated
-cluster/member IDs. Do not use insecure TLS or identify a member from mDNS TXT records.
-
-### Recommended architecture and explicit decision
-
-Use a root-owned **host service outside K3s** on each already enrolled server, not a Pod that
-requires the broken local K3s process to start. It may repair **only its own persisted member**.
-It discovers the two survivor endpoints through their enrolled `.local` names, verifies TLS
-against the enrolled etcd CA and DNS identities, and matches authenticated endpoint-status
-cluster/member IDs to the enrollment. The local target identity comes from a healthy-time,
-root-owned enrollment binding cluster ID, member ID/name, Node UID, hostname, Ethernet
-interface and configuration digest; never derive it afresh from an address during failure.
-Existing server-local etcd credentials permit this without adding a remote execution service
-or distributing new administrator credentials. Their broad privileges must remain confined
-to the local host service. Node replacement, CA rotation or changed membership invalidates
-enrollment and requires operator review.
-
-The concrete architectural choice is persistent incident ownership that can require operator
-unblocking, versus automatic takeover requiring stronger fencing across membership and service
-actions. Recommend persistent ownership for the first implementation, with a narrowly scoped
-member-URL update, local configuration change, guarded status correction and **one local
-restart request per address-change incident**. Recommended scope is opt-in, three fixed voters,
-single-stack Ethernet IPv4, the two exact K3s versions, and a pre-migrated supported YAML
-layout with hostname join targets. Refuse custom CLI/config overrides instead of rewriting
-arbitrary systemd commands. No second cluster or load balancer is required.
-
-### Ordered state machine and failure behavior
-
-1. **Observe:** debounce a stable new local Ethernet address; record an incident ID and old/new
-   configuration hashes in a durable local journal. Discover survivors via mDNS. Independently
-   authenticate both, verify proposal health, same cluster, distinct enrolled voter IDs and
-   unchanged three-member membership. Missing credentials, identity, quorum or enrollment stops
-   before any configuration, status, membership or restart action.
-2. **Reserve:** acquire a cluster-wide persistent incident record using an etcd compare-and-swap
-   on an absent key. Hold the local file lock as well. Do not use a lease timeout to silently
-   hand authority to another worker: membership RPCs cannot be fenced atomically by a separate
-   KV lease check. A paused or crashed worker must not overlap a replacement worker. Keep failed
-   incident ownership latched until the same journal safely resumes or an operator intervenes.
-   Manual maintenance must disable automation; it cannot race this coordinator's membership writes.
-3. **Prepare:** verify effective YAML/CLI precedence and the peer certificate's required SANs
-   locally. Preserve configuration and the existing DB, verify the approved backup gate, and
-   stage only the managed local address settings. Recheck both unaffected voters immediately
-   before membership mutation. If the candidate address changed again, abandon before mutation.
-4. **Update:** update only the enrolled local member ID's peer URL through the surviving quorum,
-   then read back the membership. A timeout is an unknown outcome: read back the exact ID/URL
-   before deciding whether any retry is needed. Never add/remove members, regenerate identity,
-   reset, move or delete databases. If quorum disappears, retain the incident and halt.
-5. **Converge:** inspect the local Node through an authenticated surviving API. If a stale
-   InternalIP is blocking recovery, require the enrolled UID, current local interface, matching
-   annotation and fresh resourceVersion before a status-only compare-and-swap correction.
-   Conflicts cause recollection, not an unconditional retry. Permit one local restart only after
-   membership readback and fresh two-survivor checks. A service timeout or renewed crash loop
-   latches failure; it does not trigger repeated restarts or repair another member.
-6. **Verify:** require all three authenticated voters healthy with original IDs, expected peer
-   URLs, current Node status, stable service state and application data checks. Only then mark
-   the incident complete and release its record with a comparison of the exact incident owner.
-   On a process crash, resume by observing durable state and membership; never replay an old
-   action list blindly or infer that a timed-out write did not commit.
-
-This design trades availability for safety if an incident owner crashes or evidence changes.
-It cannot promise atomicity between checking survivor health and a later restart: an unrelated
-second voter can fail in that interval. The fixed two-survivor margin, serialized ownership and
-single restart-request bound limit the automation's contribution; loss of the margin always
-stops further action. K3s installs `Restart=always`, so one request does not bound process
-restart loops. Before enabling a writer, its service supervisor must account for the existing
-restart policy and `NRestarts`, latch repeated failures, and safely stop only the affected
-member while preserving the two-survivor margin. Restoration of the original policy must be
-journaled and tested across a watcher crash. The current helper does not change that policy. Automatic recovery from simultaneous majority address loss remains excluded.
-
-### Smallest implementation and acceptance scope after the decision
-
-Implement enrollment validation, authenticated survivor collection, the persistent incident
-protocol and a resumable local driver behind an opt-in install step. Initially support only
-self-member URL updates and the managed network YAML; enable status correction only after its
-separate stale-status drill passes. Add process-crash tests at every journal boundary, write
-commit-with-timeout tests, two-worker exclusion tests, identity/CA mismatch tests, address
-flapping tests and evidence of exactly one restart. Run both exact K3s versions through a real
-single-member DHCP change with existing DBs and workload markers. The persistent-record resume
-and K3s certificate/startup behavior are integration gates, not claims established by mocks.
-This is the smallest recommended automation scope; the current PR does not yet implement it.
+1. Establish a maintenance window and console access independent of the affected LAN address.
+   Capture exact K3s versions, all member/cluster IDs, Node UIDs, peer URLs, effective settings,
+   current Ethernet addresses, Node annotations/status, service restarts and workload health.
+2. Obtain a verified etcd snapshot plus cold copies, preserving tokens and full DB directories.
+   Stop/copy/restart one server at a time, keeping two proven healthy voters. Verify restoration
+   in an isolated environment that cannot contact the original cluster. Record a persistent
+   workload marker and digest and confirm normal reads/writes before proceeding.
+3. Qualify both exact K3s versions in staging or an isolated representative K3s environment.
+   Prepare/enroll while healthy. Inspect installed units, then explicitly reload systemd and
+   enable the timer for this owner-controlled test. Do not enable an incomplete installation.
+4. Change one member's Ethernet lease through normal DHCP. For the boot path, reboot normally
+   without rerunning preparation and verify the installed pre-start loads the new address.
+   For the watcher path, leave K3s running and observe debounce, authenticated quorum proof,
+   one member update and one restart. Keep both other voters unchanged and healthy.
+5. Verify the same three member IDs and Node UIDs, current IP peer URLs, all proposal-health
+   checks, Node Ready and matching annotation/status, stable restart counts and preserved/new
+   workload writes. Confirm incident release only after the verification window.
+6. Exercise missing/ambiguous addressing, failed preparation, wrong mDNS identity, config drift,
+   stale status, a failed/ambiguous update and repeated invocations. Require no install on
+   preparation failure, no unproven mutation, no repeat restart and preserved databases. An
+   injected stale-status case needs an owner-reviewed procedure and guarded restoration.
+7. Stop on loss of a second voter, identity/TLS mismatch, changed data marker, unexpected member
+   replacement or restart loop. Disable automation, preserve diagnostics and all databases,
+   and follow explicit recovery. Do not test simultaneous address loss by trusting auto-reset.
+8. Record staging evidence and owner acceptance before production. Prepare/enroll production
+   separately with its own identities/backups; proceed one server at a time and verify all
+   voters and workloads between steps. Keep K-339 open until real-world behavior is accepted.

@@ -31,6 +31,7 @@ apt_packages=(
   jq
   curl
   python3
+  python3-yaml
   tcpdump
   nftables
 )
