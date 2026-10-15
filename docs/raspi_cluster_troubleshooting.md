@@ -736,6 +736,13 @@ HA startup even when discovery looks normal.
 - [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
 - [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json)
 
+**State-preserving recovery:**
+
+For a cluster with data to preserve, use the [Ethernet DHCP recovery guide](ethernet-dhcp-recovery.md).
+Distinguish live quorum from total quorum loss before acting. Discovery and hostname TLS SANs
+do not update persisted etcd peer URLs or stale Node status. Never use the historical rebuild
+procedure below as automatic address-change recovery.
+
 **Recovery (safe when no state must be preserved):**
 
 1. Treat this as a **full 3-server HA rebuild**: uninstall/wipe `k3s` on **all** HA servers, not just one.

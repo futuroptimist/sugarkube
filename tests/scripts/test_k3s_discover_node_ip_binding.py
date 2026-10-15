@@ -1,122 +1,190 @@
-"""Ensure node IP and flannel bindings survive interface changes."""
-
-from __future__ import annotations
+"""Supported YAML binding, migration, and failure-safe Ethernet configuration."""
 
 import os
 import subprocess
-import textwrap
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "scripts" / "configure_k3s_node_ip.sh"
-TLS_TEMPLATE = (
-    REPO_ROOT / "systemd" / "etc" / "rancher" / "k3s" / "config.yaml.d" / "10-sugarkube-tls.yaml"
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts/configure_k3s_node_ip.sh"
+
+
+@pytest.fixture
+def setup(tmp_path):
+    units = tmp_path / "systemd"
+    units.mkdir()
+    config = tmp_path / "config"
+    ip = tmp_path / "ip"
+    ip.write_text('#!/bin/sh\ncat "$IP_SAMPLE"\n')
+    ip.chmod(0o755)
+    sample = tmp_path / "sample"
+    sample.write_text("2: eth0 inet 192.168.50.12/24 scope global eth0\n")
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text('#!/bin/sh\necho "$*" >> "$CALLS"\nexit 0\n')
+    systemctl.chmod(0o755)
+    env = {
+        **os.environ,
+        "IP_CMD": str(ip),
+        "IP_SAMPLE": str(sample),
+        "SYSTEMCTL_BIN": str(systemctl),
+        "CALLS": str(tmp_path / "calls"),
+        "SYSTEMD_SYSTEM_DIR": str(units),
+        "SYSTEMD_UNIT_PATHS": str(units),
+        "SUGARKUBE_LOG_DIR": str(tmp_path / "log"),
+        "K3S_CONFIG_DIR": str(config),
+        "TLS_SAN_TEMPLATE_PATH": str(
+            ROOT / "systemd/etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml"
+        ),
+        "SUGARKUBE_MDNS_INTERFACE": "eth0",
+        "SUGARKUBE_FLANNEL_IFACE": "eth0",
+    }
+    return env, units, config, sample
+
+
+def run(setup, *args):
+    return subprocess.run(
+        ["bash", str(SCRIPT), *args], env=setup[0], capture_output=True, text=True
+    )
+
+
+def test_supported_yaml_and_idempotent_dhcp_change(setup):
+    env, units, config, sample = setup
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    assert 'node-ip: "192.168.50.12"' in dest.read_text()
+    assert 'flannel-iface: "eth0"' in dest.read_text()
+    original = dest.stat().st_mtime_ns
+    assert run(setup).returncode == 0
+    assert dest.stat().st_mtime_ns == original
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    assert run(setup).returncode == 0
+    assert 'node-ip: "192.168.50.99"' in dest.read_text()
+    calls = Path(env["CALLS"]).read_text()
+    assert "restart" not in calls
+    assert "daemon-reload" not in calls
+
+
+def test_existing_server_requires_explicit_prepare_and_never_restarts(setup):
+    env, units, config, _ = setup
+    (units / "k3s.service").touch()
+    legacy = units / "k3s.service.d/10-node-ip.conf"
+    legacy.parent.mkdir()
+    old = "[Service]\nEnvironment=K3S_NODE_IP=192.168.50.1\nEnvironment=K3S_FLANNEL_IFACE=eth0\n"
+    legacy.write_text(old)
+    assert run(setup).returncode == 2
+    assert legacy.read_text() == old
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
+    assert run(setup, "--prepare-server").returncode == 0
+    assert not legacy.exists()
+    assert Path(str(legacy) + ".pre-yaml").read_text() == old
+    assert run(setup, "--prepare-server").returncode == 0
+    assert not Path(env["CALLS"]).exists()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",
+        "2: eth0 inet 169.254.1.2/16 scope link eth0\n",
+        "2: eth0 inet 999.1.1.1/24 scope global eth0\n",
+        "2: eth0 inet 10.0.0.1/24 scope global secondary eth0\n",
+    ],
 )
+def test_missing_or_invalid_ip_preserves_configuration(setup, content):
+    _, _, config, sample = setup
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    old = dest.read_bytes()
+    sample.write_text(content)
+    assert run(setup).returncode != 0
+    assert dest.read_bytes() == old
 
 
-def _write_exec(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-    path.chmod(0o755)
+def test_custom_legacy_dropin_preserved(setup):
+    _, units, _, _ = setup
+    legacy = units / "k3s-agent.service.d/10-node-ip.conf"
+    legacy.parent.mkdir()
+    old = "[Service]\nEnvironment=K3S_NODE_IP=10.0.0.1\nExecStart=/custom\n"
+    legacy.write_text(old)
+    assert run(setup).returncode == 0
+    assert legacy.read_text() == old
 
 
-def test_wlan_toggle_preserves_wired_node_ip(tmp_path: Path) -> None:
-    """K3s keeps using the wired interface after WLAN comes back."""
+def test_unmanaged_yaml_and_symlink_are_not_overwritten(setup):
+    _, _, config, _ = setup
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    dest.parent.mkdir(parents=True)
+    dest.write_text("node-ip: 10.0.0.1\n")
+    assert run(setup).returncode == 2
+    assert dest.read_text() == "node-ip: 10.0.0.1\n"
+    dest.unlink()
+    target = config / "operator.yaml"
+    target.write_text("original")
+    dest.symlink_to(target)
+    assert run(setup).returncode == 2
+    assert target.read_text() == "original"
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
 
-    wired_ip = "192.168.50.12"
-    wlan_ip = "10.2.3.4"
+def test_interface_mismatch_is_rejected(setup):
+    setup[0]["SUGARKUBE_FLANNEL_IFACE"] = "wlan0"
+    assert run(setup).returncode == 2
+    assert not (setup[2] / "config.yaml.d/20-sugarkube-network.yaml").exists()
 
-    ip_stub = bin_dir / "ip"
-    ip_script = textwrap.dedent(
-        f"""#!/usr/bin/env bash
-set -euo pipefail
-if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] \
-  && [ "$4" = "show" ]; then
-  case "$5" in
-    eth0)
-      echo "2: eth0    inet {wired_ip}/24 brd 192.168.50.255 scope global eth0"
-      exit 0
-      ;;
-    wlan0)
-      echo "3: wlan0    inet {wlan_ip}/24 brd 10.2.3.255 scope global wlan0"
-      exit 0
-      ;;
-  esac
-fi
-echo "Unsupported invocation: $*" >&2
-exit 1
-"""
+
+def test_persisted_server_without_unit_is_guarded(setup):
+    env, _, config, _ = setup
+    data = config / "data"
+    (data / "server/db").mkdir(parents=True)
+    env["K3S_DATA_DIR"] = str(data)
+    assert run(setup).returncode == 2
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
+
+
+def test_ip_command_failure_cannot_use_partial_output(setup):
+    env, _, config, _ = setup
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    before = dest.read_bytes()
+    Path(env["IP_CMD"]).write_text(
+        '#!/bin/sh\necho "2: eth0 inet 192.168.50.99/24 scope global eth0"\nexit 1\n'
     )
-    _write_exec(ip_stub, ip_script)
+    assert run(setup).returncode == 1
+    assert dest.read_bytes() == before
 
-    systemctl_log = tmp_path / "systemctl.log"
-    systemctl_stub = bin_dir / "systemctl"
-    systemctl_script = textwrap.dedent(
-        f"""#!/usr/bin/env bash
-set -euo pipefail
-echo "$@" >> '{systemctl_log}'
-case "$1" in
-  daemon-reload)
-    exit 0
-    ;;
-  is-active)
-    exit 0
-    ;;
-  restart)
-    exit 0
-    ;;
-  list-unit-files)
-    exit 0
-    ;;
-esac
-exit 0
-"""
+
+def test_atomic_replace_failure_preserves_old_yaml(setup):
+    env, _, config, sample = setup
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    before = dest.read_bytes()
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    binaries = config / "bin"
+    binaries.mkdir()
+    stub = binaries / "mv"
+    stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    env["PATH"] = str(binaries) + ":" + env["PATH"]
+    assert run(setup).returncode == 2
+    assert dest.read_bytes() == before
+
+
+def test_ambiguous_primary_addresses_are_rejected(setup):
+    _, _, config, sample = setup
+    sample.write_text(
+        "2: eth0 inet 192.168.50.12/24 scope global eth0\n"
+        "2: eth0 inet 10.0.0.12/24 scope global eth0\n"
     )
-    _write_exec(systemctl_stub, systemctl_script)
+    assert run(setup).returncode == 1
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
 
-    systemd_dir = tmp_path / "systemd"
-    systemd_dir.mkdir()
-    for unit_name in ("k3s.service", "k3s-agent.service"):
-        (systemd_dir / unit_name).write_text("[Unit]\nDescription=stub\n", encoding="utf-8")
 
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
-            "IFACE": "eth0",
-            "IP_CMD": str(ip_stub),
-            "SYSTEMCTL_BIN": str(systemctl_stub),
-            "SYSTEMD_SYSTEM_DIR": str(systemd_dir),
-            "UNIT_SEARCH_PATHS": str(systemd_dir),
-            "SUGARKUBE_LOG_DIR": str(tmp_path / "log"),
-            "K3S_CONFIG_DIR": str(tmp_path / "etc" / "rancher" / "k3s"),
-            "TLS_SAN_TEMPLATE_PATH": str(TLS_TEMPLATE),
-            "SUGARKUBE_FLANNEL_IFACE": "eth0",
-        }
-    )
+def test_concurrent_prepare_is_rejected(setup):
+    import fcntl
 
-    subprocess.run(["bash", str(SCRIPT_PATH)], check=True, env=env, text=True)
-
-    server_dropin = systemd_dir / "k3s.service.d" / "10-node-ip.conf"
-    agent_dropin = systemd_dir / "k3s-agent.service.d" / "10-node-ip.conf"
-
-    server_lines = server_dropin.read_text(encoding="utf-8").splitlines()
-    agent_lines = agent_dropin.read_text(encoding="utf-8").splitlines()
-
-    assert server_lines == [
-        "[Service]",
-        f"Environment=K3S_NODE_IP={wired_ip}",
-        "Environment=K3S_FLANNEL_IFACE=eth0",
-    ]
-    assert agent_lines == [
-        "[Service]",
-        f"Environment=K3S_NODE_IP={wired_ip}",
-    ]
-
-    systemctl_calls = systemctl_log.read_text(encoding="utf-8").splitlines()
-    assert systemctl_calls, "systemctl should have been invoked"
-    assert any("daemon-reload" in line for line in systemctl_calls)
-    assert any(line == "restart k3s.service" for line in systemctl_calls)
-    assert any(line == "restart k3s-agent.service" for line in systemctl_calls)
+    _, _, config, _ = setup
+    config.mkdir()
+    with (config / ".sugarkube-network.lock").open("w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert run(setup).returncode == 2
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
