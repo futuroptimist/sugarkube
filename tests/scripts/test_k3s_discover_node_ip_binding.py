@@ -188,3 +188,31 @@ def test_concurrent_prepare_is_rejected(setup):
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert run(setup).returncode == 2
     assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
+
+
+def test_initial_tls_setup_and_existing_policy_preserved(setup):
+    _, _, config, _ = setup
+    assert run(setup).returncode == 0
+    tls = config / "config.yaml.d/10-sugarkube-tls.yaml"
+    assert "tls-san:" in tls.read_text()
+    tls.write_text('tls-san:\n  - "operator.local"\n')
+    assert run(setup).returncode == 0
+    assert tls.read_text() == 'tls-san:\n  - "operator.local"\n'
+
+
+def test_retry_after_failed_replace_converges_without_restart(setup):
+    env, _, config, sample = setup
+    assert run(setup).returncode == 0
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    binaries = config / "bin"
+    binaries.mkdir()
+    stub = binaries / "mv"
+    stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    env["PATH"] = str(binaries) + ":" + env["PATH"]
+    assert run(setup).returncode == 2
+    stub.unlink()
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    assert 'node-ip: "192.168.50.99"' in dest.read_text()
+    assert "restart" not in Path(env["CALLS"]).read_text()

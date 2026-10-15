@@ -121,9 +121,9 @@ render_tls_san_config() {
     return 2
   fi
 
-  mkdir -p "${dest_dir}"
+  mkdir -p "${dest_dir}" || return 3
   local tmp
-  tmp="$(mktemp "${dest}.XXXXXX")"
+  tmp="$(mktemp "${dest}.XXXXXX")" || return 3
 
   local regaddr="${SUGARKUBE_API_REGADDR:-}"
   regaddr="${regaddr//\\/\\\\}"
@@ -138,7 +138,7 @@ render_tls_san_config() {
     if [ "${compact}" = '-""' ]; then
       continue
     fi
-    printf '%s\n' "${rendered}" >>"${tmp}"
+    printf '%s\n' "${rendered}" >>"${tmp}" || { rm -f "${tmp}"; return 3; }
     wrote=1
   done <"${template}"
 
@@ -148,7 +148,7 @@ render_tls_san_config() {
     return 1
   fi
 
-  chmod 0644 "${tmp}"
+  chmod 0644 "${tmp}" || { rm -f "${tmp}"; return 3; }
 
   local changed=1
   if [ -f "${dest}" ] && cmp -s "${tmp}" "${dest}"; then
@@ -157,7 +157,7 @@ render_tls_san_config() {
 
   if [ "${changed}" -eq 1 ]; then
     log "Updating TLS SAN configuration at ${dest}"
-    mv "${tmp}" "${dest}"
+    mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 3; }
     return 0
   fi
 
@@ -218,6 +218,18 @@ PYIP
   else
     status=$?
     [ "${status}" -eq 1 ] || return "${status}"
+  fi
+  # Preserve initial TLS template setup, but never overwrite existing SAN policy.
+  local tls_dest="${K3S_CONFIG_DIR}/config.yaml.d/${TLS_SAN_DEST_NAME}"
+  if [ ! -e "${tls_dest}" ] && [ ! -L "${tls_dest}" ] && \
+    [ -f "${TLS_SAN_TEMPLATE_PATH}" ] && ! unit_exists k3s.service && \
+    [ ! -e "${K3S_DATA_DIR}/server/db" ]; then
+    if render_tls_san_config; then
+      :
+    else
+      status=$?
+      [ "${status}" -eq 1 ] || return "${status}"
+    fi
   fi
   retire_legacy_dropins
   log "Configuration prepared only; verify CLI/env overrides, membership and Node status before restart"
