@@ -235,3 +235,100 @@ Record the tested commit, K3s versions, date, operator, lease changes, checks, f
 steps and unexercised cases. Production completion requires all three servers and workloads
 healthy with data preserved and owner acceptance. Keep K-339 open if live testing is outstanding
 or if its required unattended recovery behavior exceeds this PR's explicitly bounded scope.
+
+## Proposed smallest automated path: repair this host with two surviving voters
+
+**Feasibility finding:** a single changed server can potentially recover automatically while
+its other two voters remain healthy. This is different from the simultaneous three-server
+outage. The proposal below is not implemented or enabled by this PR and must pass the live
+testing gate above. The read-only planner is an intermediate deliverable, not self-healing.
+
+[etcd runtime reconfiguration](https://etcd.io/docs/v3.6/op-guide/runtime-configuration/)
+supports updating an existing member's peer URLs while a majority is functioning, followed
+by restarting that member. It requires sequential changes and describes majority/address-loss
+recovery as manual. No member removal, new identity or database replacement is needed for the
+single-member update path. This protocol capability does not by itself establish safety for
+Sugarkube's configuration, credentials, process supervision or data.
+
+Source inspection also narrows the K3s integration work: initialized members follow the existing
+WAL path in `ETCD.Start`, and the embedded executor's `CurrentETCDOptions` returns empty initial
+options. The runtime recomputes listen/client URLs from `PrivateIP`; this is not an excuse to
+edit etcd WAL or bootstrap a replacement member. See the deployed-version
+[embedded executor](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/executor/embed/embed.go)
+and [etcd implementation](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/etcd/etcd.go).
+The [certificate generator](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/daemons/control/deps/deps.go)
+uses cluster etcd client credentials and adds configured SANs to peer/server certificates.
+A trusted CA alone is not a unique member identity: verify the TLS hostname plus authenticated
+cluster/member IDs. Do not use insecure TLS or identify a member from mDNS TXT records.
+
+### Recommended architecture and explicit decision
+
+Use a root-owned **host service outside K3s** on each already enrolled server, not a Pod that
+requires the broken local K3s process to start. It may repair **only its own persisted member**.
+It discovers the two survivor endpoints through their enrolled `.local` names, verifies TLS
+against the enrolled etcd CA and DNS identities, and matches authenticated endpoint-status
+cluster/member IDs to the enrollment. The local target identity comes from a healthy-time,
+root-owned enrollment binding cluster ID, member ID/name, Node UID, hostname, Ethernet
+interface and configuration digest; never derive it afresh from an address during failure.
+Existing server-local etcd credentials permit this without adding a remote execution service
+or distributing new administrator credentials. Their broad privileges must remain confined
+to the local host service. Node replacement, CA rotation or changed membership invalidates
+enrollment and requires operator review.
+
+The architectural decision is whether to authorize that narrowly privileged automatic
+member-URL update, local configuration change, guarded status correction and **one local
+restart per address-change incident**. Recommended scope is opt-in, three fixed voters,
+single-stack Ethernet IPv4, the two exact K3s versions, and a pre-migrated supported YAML
+layout with hostname join targets. Refuse custom CLI/config overrides instead of rewriting
+arbitrary systemd commands. No second cluster or load balancer is required.
+
+### Ordered state machine and failure behavior
+
+1. **Observe:** debounce a stable new local Ethernet address; record an incident ID and old/new
+   configuration hashes in a durable local journal. Discover survivors via mDNS. Independently
+   authenticate both, verify proposal health, same cluster, distinct enrolled voter IDs and
+   unchanged three-member membership. Missing credentials, identity, quorum or enrollment stops
+   before any configuration, status, membership or restart action.
+2. **Reserve:** acquire a cluster-wide persistent incident record using an etcd compare-and-swap
+   on an absent key. Hold the local file lock as well. Do not use a lease timeout to silently
+   hand authority to another worker: membership RPCs cannot be fenced atomically by a separate
+   KV lease check. A paused or crashed worker must not overlap a replacement worker. Keep failed
+   incident ownership latched until the same journal safely resumes or an operator intervenes.
+   Manual maintenance must disable automation; it cannot race this coordinator's membership writes.
+3. **Prepare:** verify effective YAML/CLI precedence and the peer certificate's required SANs
+   locally. Preserve configuration and the existing DB, verify the approved backup gate, and
+   stage only the managed local address settings. Recheck both unaffected voters immediately
+   before membership mutation. If the candidate address changed again, abandon before mutation.
+4. **Update:** update only the enrolled local member ID's peer URL through the surviving quorum,
+   then read back the membership. A timeout is an unknown outcome: read back the exact ID/URL
+   before deciding whether any retry is needed. Never add/remove members, regenerate identity,
+   reset, move or delete databases. If quorum disappears, retain the incident and halt.
+5. **Converge:** inspect the local Node through an authenticated surviving API. If a stale
+   InternalIP is blocking recovery, require the enrolled UID, current local interface, matching
+   annotation and fresh resourceVersion before a status-only compare-and-swap correction.
+   Conflicts cause recollection, not an unconditional retry. Permit one local restart only after
+   membership readback and fresh two-survivor checks. A service timeout or renewed crash loop
+   latches failure; it does not trigger repeated restarts or repair another member.
+6. **Verify:** require all three authenticated voters healthy with original IDs, expected peer
+   URLs, current Node status, stable service state and application data checks. Only then mark
+   the incident complete and release its record with a comparison of the exact incident owner.
+   On a process crash, resume by observing durable state and membership; never replay an old
+   action list blindly or infer that a timed-out write did not commit.
+
+This design trades availability for safety if an incident owner crashes or evidence changes.
+It cannot promise atomicity between checking survivor health and a later restart: an unrelated
+second voter can fail in that interval. The fixed two-survivor margin, serialized ownership and
+single restart bound limit the automation's contribution; loss of the margin always stops
+further action. Automatic recovery from simultaneous majority address loss remains excluded.
+
+### Smallest implementation and acceptance scope after the decision
+
+Implement enrollment validation, authenticated survivor collection, the persistent incident
+protocol and a resumable local driver behind an opt-in install step. Initially support only
+self-member URL updates and the managed network YAML; enable status correction only after its
+separate stale-status drill passes. Add process-crash tests at every journal boundary, write
+commit-with-timeout tests, two-worker exclusion tests, identity/CA mismatch tests, address
+flapping tests and evidence of exactly one restart. Run both exact K3s versions through a real
+single-member DHCP change with existing DBs and workload markers. The persistent-record resume
+and K3s certificate/startup behavior are integration gates, not claims established by mocks.
+This is the smallest recommended automation scope; the current PR does not yet implement it.
