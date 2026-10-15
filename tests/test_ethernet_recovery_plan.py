@@ -3,6 +3,7 @@
 import copy
 import importlib.util
 import json
+import runpy
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -224,3 +225,51 @@ def test_mdns_timeout_cannot_produce_a_plan(evidence, monkeypatch):
     monkeypatch.setattr(MODULE.subprocess, "run", timeout)
     with pytest.raises(subprocess.TimeoutExpired):
         MODULE.resolve_mdns(evidence)
+
+
+@pytest.mark.parametrize(
+    "scenario", ["healthy", "no_quorum", "stale", "malformed", "discovery", "timeout"]
+)
+def test_cli_entrypoint_results_and_evidence_preservation(
+    evidence, tmp_path, monkeypatch, capsys, scenario
+):
+    """Exercise the actual command entrypoint, including exit codes and safe failures."""
+    evidence["captured_at"] = datetime.now(timezone.utc).isoformat()
+    if scenario == "no_quorum":
+        for health in evidence["health"]:
+            health["healthy"] = False
+    elif scenario == "stale":
+        evidence["captured_at"] = (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()
+    elif scenario == "malformed":
+        evidence = {"private": "do-not-echo"}
+    path = tmp_path / "evidence.json"
+    original = json.dumps(evidence)
+    path.write_text(original)
+    calls = []
+
+    def avahi(argv, **kwargs):
+        calls.append(argv)
+        assert argv[0:2] == ["avahi-resolve-host-name", "-4"]
+        assert kwargs["timeout"] == 5 and kwargs["check"] is True
+        if scenario == "timeout":
+            raise subprocess.TimeoutExpired(argv, 5)
+        addresses = {n["mdns_name"]: n["ethernet_ipv4"] for n in evidence["nodes"]}
+        return subprocess.CompletedProcess(argv, 0, f"{argv[2]}\t{addresses[argv[2]]}\n")
+
+    monkeypatch.setattr(subprocess, "run", avahi)
+    argv = [str(SCRIPT), str(path)]
+    if scenario in ("discovery", "timeout"):
+        argv.append("--resolve-mdns")
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    successful = scenario in ("healthy", "discovery")
+    assert exit_info.value.code == (0 if successful else 2)
+    assert result["mode"] == ("no-change" if successful else "operator-intervention")
+    assert result["automatic_actions"] == []
+    assert result["candidates"] == []
+    assert path.read_text() == original
+    assert "do-not-echo" not in captured.out + captured.err
+    assert len(calls) == {"discovery": 3, "timeout": 1}.get(scenario, 0)
