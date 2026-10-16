@@ -423,8 +423,23 @@ server help. The following commands are templates for an approved window, not co
 while writing or reviewing this documentation. `RESET_CONFIG` must be an operator-set absolute
 path to a separate reviewed root-only reset configuration, with the correct token file, identity,
 and data path. Remove `server` from that file and every drop-in it loads; do not pass `--server`.
-Ensure the effective reset process has no `K3S_URL`, including environment preserved by `sudo`
-or injected by a wrapper. Both deployed versions reject a reset with a nonempty join URL: see
+Use a clean environment for both reset templates below. In both incident versions,
+`K3S_CONFIG_FILE` is checked before `--config`, so an inherited value can select another file
+and its data directory despite the reviewed argument: see the
+[staging config parser](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/configfilearg/parser.go#L167-L181)
+and [production config parser](https://github.com/k3s-io/k3s/blob/v1.34.5%2Bk3s1/pkg/configfilearg/parser.go#L167-L181).
+Clearing only `K3S_URL` is insufficient. The templates discard all inherited variables, including
+`K3S_CONFIG_FILE`, `K3S_DATA_DIR`, token, datastore, S3, debug, and proxy settings. They allow only
+a fixed system `PATH`, root `HOME`, and C locale. Put required supported settings explicitly in
+`RESET_CONFIG`, including `data-dir`, `token-file`, node identity, and critical cluster flags;
+review every loaded drop-in as well. Do not source or forward the service environment wholesale.
+If recovery requires a proxy or another environment-only setting, stop and review an explicit
+allowlist addition before use; never preserve the caller's environment as a shortcut.
+
+Set `K3S_BINARY` to the verified absolute path of the installed, exact-version K3s executable,
+not a shell alias or wrapper that can inject settings. The clean environment is applied after
+`sudo`, so variables preserved by sudo policy are discarded before K3s starts. Ensure the effective
+reset process has no `K3S_URL`. Both deployed versions reject a reset with a nonempty join URL: see
 [staging validation](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/cli/server/server.go#L445-L449)
 and [production validation](https://github.com/k3s-io/k3s/blob/v1.34.5%2Bk3s1/pkg/cli/server/server.go#L499-L503).
 This requirement applies to both existing-database resets and snapshot restoration, including
@@ -439,7 +454,9 @@ one membership reset on the selected seed only:
 
 ```bash
 sudo systemctl stop k3s
-sudo env -u K3S_URL k3s server --config "${RESET_CONFIG:?set reviewed reset config}" --cluster-reset
+sudo /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/root LANG=C "${K3S_BINARY:?set verified absolute K3s binary path}" server \
+  --config "${RESET_CONFIG:?set reviewed reset config}" --cluster-reset
 ```
 
 This resets membership using the existing database; it does not select or restore a scheduled
@@ -564,7 +581,9 @@ an isolated environment; obtain explicit acceptance of potential lost writes bef
 With all servers stopped and exactly one selected seed, the reviewed local-snapshot template is:
 
 ```bash
-sudo env -u K3S_URL k3s server --config "${RESET_CONFIG:?set reviewed reset config}" \
+sudo /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/root LANG=C "${K3S_BINARY:?set verified absolute K3s binary path}" server \
+  --config "${RESET_CONFIG:?set reviewed reset config}" \
   --cluster-reset --cluster-reset-restore-path "${VERIFIED_SNAPSHOT:?select verified snapshot}" \
   --etcd-s3=false
 ```
