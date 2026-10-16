@@ -1,6 +1,7 @@
 """Synthetic records test bookkeeping only; no restore or secret access."""
 
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -110,17 +111,22 @@ def test_rejects_unknown_fields_and_private_reference_paths(record):
     assert validate(record)
 
 
-def test_cli_rejects_invalid_json_without_echoing_input(tmp_path):
+def run_cli_in_process(path, monkeypatch, capsys):
+    # Exercise the real entry point without relying on child-process coverage startup.
+    script = ROOT / "scripts/validate_restore_evidence.py"
+    monkeypatch.setattr(sys, "argv", [str(script), str(path)])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(script), run_name="__main__")
+    return exit_info.value.code, capsys.readouterr()
+
+
+def test_cli_rejects_invalid_json_without_echoing_input(tmp_path, monkeypatch, capsys):
     path = tmp_path / "record.json"
     path.write_text("invalid-content-not-to-echo")
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/validate_restore_evidence.py"), str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "invalid-content-not-to-echo" not in result.stdout + result.stderr
-    assert json.loads(result.stdout)["live_qualified"] is False
+    code, captured = run_cli_in_process(path, monkeypatch, capsys)
+    assert code == 1
+    assert "invalid-content-not-to-echo" not in captured.out + captured.err
+    assert json.loads(captured.out)["live_qualified"] is False
 
 
 @pytest.mark.parametrize("section", ["artifact", "backup", "seed", "measurements", "gates"])
@@ -138,16 +144,12 @@ def test_recovery_cannot_precede_incident(record):
     assert validate(record)
 
 
-def test_duplicate_json_fields_rejected(tmp_path):
+def test_duplicate_json_fields_rejected(tmp_path, monkeypatch, capsys):
     path = tmp_path / "duplicate.json"
     source = FIXTURE.read_text().replace(
         '"recovery": "completed"', '"recovery": "interrupted", "recovery": "completed"'
     )
     path.write_text(source)
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/validate_restore_evidence.py"), str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert json.loads(result.stdout)["record_complete"] is False
+    code, captured = run_cli_in_process(path, monkeypatch, capsys)
+    assert code == 1
+    assert json.loads(captured.out)["record_complete"] is False
