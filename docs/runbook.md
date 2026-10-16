@@ -420,8 +420,16 @@ Before any membership reset or peer database move:
 
 Use the [K3s backup prerequisites](https://docs.k3s.io/datastore/backup-restore) and the exact-version
 server help. The following commands are templates for an approved window, not commands to execute
-while writing or reviewing this documentation. `RECOVERY_CONFIG` must be an operator-set absolute
-path to the reviewed root-only configuration, with the correct token file, identity, and data path.
+while writing or reviewing this documentation. `RESET_CONFIG` must be an operator-set absolute
+path to a separate reviewed root-only reset configuration, with the correct token file, identity,
+and data path. Remove `server` from that file and every drop-in it loads; do not pass `--server`.
+Ensure the effective reset process has no `K3S_URL`, including environment preserved by `sudo`
+or injected by a wrapper. Both deployed versions reject a reset with a nonempty join URL: see
+[staging validation](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/cli/server/server.go#L445-L449)
+and [production validation](https://github.com/k3s-io/k3s/blob/v1.34.5%2Bk3s1/pkg/cli/server/server.go#L499-L503).
+This requirement applies to both existing-database resets and snapshot restoration, including
+when a former joining peer is chosen as seed. Preserve normal reviewed peer join configuration
+separately; do not remove peer join targets from the configuration used for sequential rejoin.
 Never place a token value on the command line. Do not set reset flags in persistent configuration.
 
 #### 4. Recover exactly one isolated seed
@@ -431,14 +439,14 @@ one membership reset on the selected seed only:
 
 ```bash
 sudo systemctl stop k3s
-sudo k3s server --config "${RECOVERY_CONFIG:?set reviewed recovery config}" --cluster-reset
+sudo env -u K3S_URL k3s server --config "${RESET_CONFIG:?set reviewed reset config}" --cluster-reset
 ```
 
 This resets membership using the existing database; it does not select or restore a scheduled
 snapshot. Require a successful completion message and exit before restarting normally. Preserve
 failure output privately and stop on errors. Do not bypass the reset safety marker, repeat resets,
 or reset a second seed. Confirm persistent service configuration has the same intended settings
-and no reset/restore flags, then start only the seed:
+and no reset/restore flags or obsolete join target, then start only the seed:
 
 ```bash
 sudo systemctl start k3s
@@ -556,7 +564,7 @@ an isolated environment; obtain explicit acceptance of potential lost writes bef
 With all servers stopped and exactly one selected seed, the reviewed local-snapshot template is:
 
 ```bash
-sudo k3s server --config "${RECOVERY_CONFIG:?set reviewed recovery config}" \
+sudo env -u K3S_URL k3s server --config "${RESET_CONFIG:?set reviewed reset config}" \
   --cluster-reset --cluster-reset-restore-path "${VERIFIED_SNAPSHOT:?select verified snapshot}" \
   --etcd-s3=false
 ```
