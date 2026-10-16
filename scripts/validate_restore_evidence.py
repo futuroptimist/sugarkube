@@ -138,9 +138,15 @@ def validate(record):
             times["started_utc"] >= times["incident_utc"],
             "measurements: recovery starts before incident",
         )
+    if "started_utc" in times and "accepted_utc" in times:
+        require(
+            times["accepted_utc"] >= times["started_utc"],
+            "measurements: recovery accepted before execution starts",
+        )
+    # End-to-end recovery time includes downtime before execution starts.
     for metric, start, end in (
         ("rpo", "recovered_through_utc", "incident_utc"),
-        ("rto", "started_utc", "accepted_utc"),
+        ("rto", "incident_utc", "accepted_utc"),
     ):
         actual = measurements.get(f"{metric}_seconds")
         objective = measurements.get(f"{metric}_objective_seconds")

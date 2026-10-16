@@ -26,7 +26,7 @@
     "started_utc": "2026-10-01T00:15:00Z",
     "accepted_utc": "2026-10-01T00:45:00Z",
     "rpo_seconds": 600,
-    "rto_seconds": 1800,
+    "rto_seconds": 2100,
     "rpo_objective_seconds": 900,
     "rto_objective_seconds": 3600,
     "evidence_ref": "synthetic-timing"

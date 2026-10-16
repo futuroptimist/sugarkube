@@ -630,8 +630,26 @@ neither opens references nor verifies their truth or redaction; review before pu
 | Seed and peers | Successful restore completion/exit before seed start; representative seed objects checked before peers. Preserve every original peer database outside its active path and rejoin one at a time, verifying each voter before proceeding. Interrupted recovery stops, preserves diagnostics and requires a new reviewed plan. |
 | Independent acceptance | Record all gates above: API, membership/voters, addresses/TLS, leases/restarts, networking, representative object contents, PVC file/application data, acknowledged writes and service-specific user journeys. Ready or Bound status alone never passes these checks. |
 | Monitoring | Reference independent evidence owned by [#2918](https://github.com/futuroptimist/sugarkube/issues/2918); this record does not implement or substitute for that verifier. |
-| Timing and objectives | UTC incident, start, recovered-through and accepted times with measurement evidence. RPO is incident minus last verified recovered write; RTO is start through completion of all acceptance gates. Record incident-to-start delay separately in evidence. Set explicit objectives before the drill, compare measurements and document excluded scope; a schedule is not measured capability. |
+| Timing and objectives | Record the UTC timeline and measurement evidence using the definitions below. Set explicit objectives before the drill, compare measured durations and document excluded scope; a schedule is not measured capability. |
 | Stop, rollback and acceptance | Reference the stop/rollback rules above, preserved originals and new state, approved observation duration/sample count per gate, untested scope and operator acceptance. Failed, interrupted or omitted gates keep qualification open. |
+
+For recovery timing, `incident_utc` is the onset of system unavailability (or the declared
+simulated incident in an isolated drill), not the later detection or operator start time.
+`started_utc` records the first recovery action; `accepted_utc` records completion of all
+acceptance gates. Require `incident_utc <= started_utc <= accepted_utc`.
+
+The [recovery time objective](https://csrc.nist.gov/glossary/term/Recovery_Time_Objective)
+is the maximum acceptable recovery interval. In this record, `rto_objective_seconds` is that
+predeclared limit, while `rto_seconds` is the **measured total recovery time** from `incident_utc`
+to `accepted_utc`. It includes all downtime before execution starts, such as detection,
+operator decisions, and environment preparation. The execution duration from `started_utc`
+to `accepted_utc` and the incident-to-start delay may be recorded separately in private evidence;
+neither replaces the total interval when checking the objective. If outage onset is unknown,
+leave it unmeasured and the record incomplete rather than using the later action start.
+`rpo_seconds` remains incident time minus the last verified recovered write (`recovered_through_utc`).
+
+For example, the synthetic fixture has a five-minute delay and 30-minute execution, so its
+measured total recovery time is 35 minutes (2,100 seconds). These are invented test inputs.
 
 The offline validator only checks declared completeness and consistency:
 

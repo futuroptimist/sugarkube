@@ -74,7 +74,7 @@ def test_each_gate_requires_evidence(record, gate):
         ("measurements", "rpo_seconds", 599),
         ("measurements", "rto_seconds", True),
         ("measurements", "rpo_objective_seconds", 599),
-        ("measurements", "rto_objective_seconds", 1799),
+        ("measurements", "rto_objective_seconds", 2099),
         ("measurements", "accepted_utc", None),
         ("measurements", "accepted_utc", "2026-10-01T00:45:00"),
         ("measurements", "recovered_through_utc", "2026-10-02T00:00:00Z"),
@@ -153,3 +153,60 @@ def test_duplicate_json_fields_rejected(tmp_path, monkeypatch, capsys):
     code, captured = run_cli_in_process(path, monkeypatch, capsys)
     assert code == 1
     assert json.loads(captured.out)["record_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "reported_rto,expected_error",
+    [(1800, "inconsistent rto timestamps"), (9000, "rto objective exceeded")],
+)
+def test_delayed_start_cannot_hide_outage(record, reported_rto, expected_error):
+    record["measurements"].update(
+        started_utc="2026-10-01T02:10:00Z",
+        accepted_utc="2026-10-01T02:40:00Z",
+        rto_seconds=reported_rto,
+    )
+    # A 30-minute execution followed a two-hour delay; the outage was 150 minutes.
+    assert f"measurements: {expected_error}" in validate(record)
+
+
+@pytest.mark.parametrize("started", ["00:10:00", "00:15:00", "00:45:00"])
+def test_execution_start_does_not_change_end_to_end_recovery_time(record, started):
+    record["measurements"].update(
+        started_utc=f"2026-10-01T{started}Z", rto_seconds=2100, rto_objective_seconds=2100
+    )
+    assert validate(record) == []
+
+
+def test_end_to_end_recovery_exactly_at_objective(record):
+    record["measurements"].update(
+        started_utc="2026-10-01T02:10:00Z",
+        accepted_utc="2026-10-01T02:40:00Z",
+        rto_seconds=9000,
+        rto_objective_seconds=9000,
+    )
+    assert validate(record) == []
+    record["measurements"]["rto_objective_seconds"] = 8999
+    assert "measurements: rto objective exceeded" in validate(record)
+
+
+def test_recovery_cannot_be_accepted_before_execution_starts(record):
+    record["measurements"].update(started_utc="2026-10-01T01:00:00Z", rto_seconds=2100)
+    assert "measurements: recovery accepted before execution starts" in validate(record)
+
+
+def test_cli_rejects_short_execution_that_exceeds_outage_objective(
+    record, tmp_path, monkeypatch, capsys
+):
+    record["measurements"].update(
+        started_utc="2026-10-01T02:10:00Z",
+        accepted_utc="2026-10-01T02:40:00Z",
+        rto_seconds=1800,
+    )
+    path = tmp_path / "delayed-start.json"
+    path.write_text(json.dumps(record))
+    code, captured = run_cli_in_process(path, monkeypatch, capsys)
+    output = json.loads(captured.out)
+    assert code == 1
+    assert output["record_complete"] is False
+    assert output["live_qualified"] is False
+    assert "measurements: inconsistent rto timestamps" in output["errors"]
