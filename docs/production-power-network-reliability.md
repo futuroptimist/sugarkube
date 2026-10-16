@@ -40,39 +40,75 @@ not a current physical survey:
 
 | Surface | Known or proposed role | Evidence still needed before design approval |
 | --- | --- | --- |
-| Fiber gateway | Reported primary internet gateway | Exact mode, power feed, handoff, actual link health, and whether it supplies any required LAN service |
-| Google Wifi router | Router in the proposed dependency inventory | Routing, DHCP, DNS, WiFi and switch dependencies; installed model and supported WAN behavior |
+| Upstream gateway (fiber in this scenario) | Primary internet handoff | Exact mode, power feed, handoff, actual link health, and whether it supplies any required LAN service |
+| LAN router and DHCP/DNS services | Required routing, dynamic address assignment and name resolution | Which devices provide each function, supported WAN handoffs, lease renewal and DNS behavior on both paths |
 | Cellular gateway | Proposed alternate internet path | Carrier, plan, reception, interface, routing mode, power draw and independent operation |
-| WAN selection and LAN routing | Required function; device ownership unresolved | Manual versus automatic switching, DHCP/DNS ownership, address stability and supported topology |
+| WAN selection | Required way to select a working upstream path; device ownership unresolved | Manual versus automatic switching, supported interfaces and behavior when the WAN address changes |
 | Necessary switches | Every switch on the production path must remain powered | Port and cable map, uplinks, power supplies, PoE loads and shared staging dependencies |
+| Wireless access points | Conditional dependency if production connectivity or the approved recovery route uses WiFi | Whether needed at all, power and wired uplink dependencies, client isolation and local multicast behavior |
 | Three production Pis | Outage compute target | Node roles, quorum, workload placement, local storage, power supplies and restart order |
 | Tunnel and ingress | Repository documents Cloudflare Tunnel to cluster ingress | Production connector placement, DNS resolution, outbound connectivity, ingress, certificates, origins and external service dependencies |
 
 The following is a **candidate functional path**, not a verified wiring diagram:
 
 ```text
-Normal WAN:     fiber gateway ----+
-                                 +-- WAN selection / LAN router -- required switches
-Outage WAN:     cellular gateway -+                                |
-                                                          three production Pis
-                                                               |
-                                                tunnel connector / ingress / apps
+Normal WAN:     upstream gateway (fiber) --+
+                                         +-- WAN selection -- LAN router -- switches
+Outage WAN:     cellular gateway ---------+                         |           |
+                                                        DHCP/DNS services     |
+                                                                    three production Pis
+                                                                             |
+                                                              tunnel / ingress / apps
+
+Optional: required switches -- access point -- any required wireless clients
 
 External clients <-> Cloudflare edge <-> outbound tunnel over the selected WAN
 ```
 
-The local battery boundary includes the cellular gateway, required routing and
-DHCP/DNS functions, all necessary switches, the three Pis, storage, cooling and
-their power conversion equipment. External carrier infrastructure, Cloudflare,
-public DNS and upstream application services remain outside that boundary.
+These are functional roles, not a requirement for separate boxes or a particular
+brand. One device may combine routing, DHCP, DNS forwarding, Ethernet switching
+and a wireless access point; verify each function rather than infer it from a
+product label. DHCP/DNS services shown alongside the router may run elsewhere.
 
-Do not assume Google Wifi supports automatic dual-WAN operation, that a cellular
-gateway can replace it, or that any proposed UPS works with the installed supplies.
-Inventory and supported-device documentation must resolve these questions first.
-If production still needs Google Wifi for routing, DHCP, DNS or connectivity, its
-power belongs in the initial battery budget. The same rule applies to any function
-provided by the fiber gateway. A later UPS for the fiber gateway/router is optional
-**only after the initial cellular path is shown to operate with both absent**.
+The local battery boundary includes the cellular gateway, required routing and
+DHCP/DNS functions, all necessary switches and access points, the three Pis,
+storage, cooling and their power conversion equipment. Include an access point
+only if production or the approved recovery route needs it. External carrier
+infrastructure, Cloudflare, public DNS and upstream application services remain
+outside that boundary.
+
+### Required capabilities and optional features
+
+The design assumes a LAN routing function that can reach the selected upstream
+gateway, working DHCP service for dynamic leases, DNS resolution through the
+selected WAN, and local connectivity among the production nodes. Verify supported
+WAN interfaces, gateway routing modes and outbound tunnel connectivity for the
+actual equipment. A router may forward DNS rather than host a resolver itself;
+the required property is working resolution on both paths without an unpowered
+dependency. No specific router is assumed to provide all these functions.
+
+Preserve intentional dynamic DHCP and mDNS discovery. Fixed IP addresses and DHCP
+reservations are not prerequisites for this design. Verify lease acquisition and
+renewal, including changed addresses after restart, plus local multicast delivery
+and mDNS discovery on the production LAN. mDNS is local discovery, not a substitute
+for upstream DNS resolution. Confirm that switch or access-point isolation does
+not block required discovery; do not assume mDNS crosses routed network boundaries.
+See [mDNS troubleshooting](mdns_troubleshooting.md) for the existing discovery model.
+
+Automatic dual-WAN switching, bridge mode, VLANs, PoE and wireless mesh are optional
+features, not universal router capabilities or requirements. A supported manual
+handoff may be acceptable if it meets the human-approved recovery objective.
+Document who performs it and how they retain access during an outage. Automatic
+failover requires verified device support, health detection and recovery behavior;
+this diagram does not imply such support. Likewise, do not assume a cellular gateway
+can replace the LAN router or that a proposed UPS works with the installed supplies.
+
+If production still needs a router for routing, DHCP, DNS or connectivity, its power
+belongs in the initial battery budget. The same rule applies to required functions
+in the upstream gateway, switches or access points. A later UPS for the primary
+upstream gateway and any primary-only router is optional **only after the initial
+cellular path is shown to operate with those devices absent**. A shared LAN router
+remains an initial power dependency and a potential single point of failure.
 
 ## Failure modes and intended response
 
@@ -81,7 +117,7 @@ provided by the fiber gateway. A later UPS for the fiber gateway/router is optio
 | Fiber loss with utility power present | Use cellular; detect end-to-end failure even when an Ethernet link or app status remains up |
 | Utility loss with fiber still available | Preserve the complete production path on battery; do not infer battery coverage from powered Pis alone |
 | Simultaneous utility and fiber loss | Cellular plus the complete battery boundary serves the approved critical workload without staging |
-| Google Wifi or fiber gateway failure | Independent outage path remains usable; otherwise record the shared device as an unresolved single point of failure |
+| LAN router or upstream gateway failure | Independent outage path remains usable if provided; otherwise record the shared device as an unresolved single point of failure |
 | Switch, uplink or power supply failure | Identify the affected production dependency; WAN redundancy alone does not repair a broken LAN |
 | Cellular outage, poor reception or exhausted allowance | Declare degraded/unavailable service, alert through a verified reachable route, and follow the approved traffic policy |
 | WAN address or route change | Observe tunnel reconnection, existing session interruption, DNS behavior and application recovery |
@@ -188,17 +224,19 @@ establish runtime or compatibility. No battery capacity or product is selected y
    and cellular operation individually. Measure detection, route selection, tunnel
    reconnection and first sustained successful critical-service response separately.
    Check both new and existing sessions, DNS, ingress, origin reachability and data
-   accounting. A ready tunnel alone is not proof of an available application.
+   accounting. Verify the selected manual or automatic handoff and any required
+   wireless path. A ready tunnel alone is not proof of an available application.
 4. **Power tests:** test the approved full battery boundary under the critical load,
    then the combined power-plus-fiber failure. Demonstrate operation with staging
-   absent and with the fiber gateway/router absent if their UPS is deferred. Record
-   runtime, peak draw, battery state and service health without an uncontrolled
+   absent and with any primary-only gateway/router absent if its UPS is deferred.
+   Record runtime, peak draw, battery state and service health without an uncontrolled
    deep discharge. Stop on instability, overheating, unexpected load, loss of the
    recovery route, or any agreed time/data/battery limit.
 5. **Recovery tests:** define failover detection and timeout, then require a stable
    primary path for an agreed hold-down period before failback. Test intermittent
    primary recovery to avoid repeated switching. Measure tunnel and application
-   recovery on both transitions and after a controlled restart. Verify DHCP/DNS,
+   recovery on both transitions and after a controlled restart. Verify DHCP lease
+   renewal and changed-address recovery, mDNS discovery and upstream DNS resolution,
    clock synchronization, existing credential availability and whether cached
    images/configuration allow recovery without an unexpected large download.
 6. **Acceptance gate:** the human owner reviews measured results against the chosen
