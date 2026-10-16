@@ -303,7 +303,10 @@ Markdown and JSON exports stay consistent across releases.
 ### Scheduled snapshots
 
 Etcd snapshots are scheduled via the k3s configuration (`0 */12 * * *`) and retained for
-twenty-eight iterations. Longhorn additionally manages volume snapshots according to application
+twenty-eight iterations in the [S3 example](k3s/etcd-s3-backups.md): about 14 days locally
+at two snapshots per day, not four weeks. Verify the effective configuration and actual oldest
+usable snapshot; the server join/first examples retain only five. Remote retention and bucket
+lifecycle need separate verification. Longhorn additionally manages volume snapshots according to application
 policies.
 
 ### Off-cluster archive
@@ -596,6 +599,57 @@ Do not simply restart peers with their obsolete databases. Follow the upstream
 [K3s reset and restore reference](https://docs.k3s.io/cli/etcd-snapshot) and check exact-version
 behavior before use. Restore testing and application-data proof remain open in
 [#2919](https://github.com/futuroptimist/sugarkube/issues/2919).
+
+### Offline restore qualification record
+
+Repository preparation for [#2919](https://github.com/futuroptimist/sugarkube/issues/2919)
+does not authorize a drill or establish recoverability. Use the decision table above to distinguish
+healthy-quorum repair, failed-member replacement, existing-database recovery, and snapshot restore.
+Only the last path qualifies a scheduled snapshot. Keep this section with the canonical procedure;
+no separate command sequence is implied by the checklist.
+
+Copy the [blank manifest](k3s/restore-qualification.template.json) for a separately authorized
+isolated drill. Leave unmeasured fields null and gates `not_run`; a blank record intentionally
+fails completeness checks. Do not fill gaps using incident observations or synthetic fixtures.
+Record `incomplete`, `fail`, or `interrupted` promptly when a prerequisite or recovery step fails.
+`not_applicable` requires a documented human scope decision and does not pass the offline check.
+
+Keep private evidence in approved storage. Publish only sanitized opaque IDs in `evidence_ref`,
+`provenance_ref`, and `decision_ref`; never private paths, endpoints, credentials, token values,
+configuration contents, or raw diagnostic output. IDs are references, not proof. The validator
+neither opens references nor verifies their truth or redaction; review before publication.
+
+| Record/checkpoint | Required private evidence behind the sanitized record |
+| --- | --- |
+| Artifact and versions | Exact K3s release including patch/build, binary architecture and SHA256, installation provenance, backup producer version and identical restore version; separately verify support and exact-version options. No upgrade during recovery. |
+| Backup inventory and provenance | Snapshot ID, creation time, source cluster/node identity, size, checksum, readability and integrity results; cold-copy inventory with original permissions, completeness, independent application/PVC backups and their recovery points. Never choose newest-by-filename alone. |
+| Retention, access and independence | Effective schedule, actual freshness and oldest usable copy, local and remote retention/lifecycle, independent failure domain and access without the original API. An archive listing or checksum alone is insufficient. |
+| Token and configuration prerequisites | Attest original server token availability and match to backup, protected custody/access, reviewed effective data directory, identity, critical flags and all loaded configuration/drop-ins. Record no values. Verify clean reset environment and separate normal peer join configuration. |
+| Isolation and seed decision | Approved isolated environment, all production peer/contact paths excluded, automation stopped, all servers stopped or demonstrably isolated. Record exactly one selected seed ID, alternatives, identity/freshness basis, uncertainties and operator approval before reset. |
+| Operator checkpoints | Separate timestamped decisions before seed selection, reset, each peer database move, and data restore; record recovery-point loss acceptance, operator identity privately and preserved originals. `reset_approved` must cover the explicit data-restore decision too. |
+| Seed and peers | Successful restore completion/exit before seed start; representative seed objects checked before peers. Preserve every original peer database outside its active path and rejoin one at a time, verifying each voter before proceeding. Interrupted recovery stops, preserves diagnostics and requires a new reviewed plan. |
+| Independent acceptance | Record all gates above: API, membership/voters, addresses/TLS, leases/restarts, networking, representative object contents, PVC file/application data, acknowledged writes and service-specific user journeys. Ready or Bound status alone never passes these checks. |
+| Monitoring | Reference independent evidence owned by [#2918](https://github.com/futuroptimist/sugarkube/issues/2918); this record does not implement or substitute for that verifier. |
+| Timing and objectives | UTC incident, start, recovered-through and accepted times with measurement evidence. RPO is incident minus last verified recovered write; RTO is start through completion of all acceptance gates. Record incident-to-start delay separately in evidence. Set explicit objectives before the drill, compare measurements and document excluded scope; a schedule is not measured capability. |
+| Stop, rollback and acceptance | Reference the stop/rollback rules above, preserved originals and new state, approved observation duration/sample count per gate, untested scope and operator acceptance. Failed, interrupted or omitted gates keep qualification open. |
+
+The offline validator only checks declared completeness and consistency:
+
+```bash
+python3 scripts/validate_restore_evidence.py docs/k3s/restore-qualification.template.json
+python3 scripts/validate_restore_evidence.py tests/fixtures/restore_evidence_synthetic.json
+```
+
+The template exits 1; the explicitly synthetic fixture exits 0 with `record_complete: true` and
+`live_qualified: false`. Exit 0 never authorizes a restore or certifies evidence. All records must
+retain `qualification: not_qualified`, including `operator_record` records; independent human
+qualification and remaining live work stay in #2919. The fixture's timestamps, checksum and
+measurements are invented test inputs, not a backup or measured capability.
+
+Before any separately approved drill, rehearse missing/invalid snapshots, missing or mismatched
+tokens, version mismatch, incomplete backups, ambiguous seed selection and interrupted peer
+recovery. Offline mutation tests exercise rejection only; actual restore failure behavior and
+application data recovery remain **not run** by this repository work.
 
 ## 7. Promotion flow
 

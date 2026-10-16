@@ -74,3 +74,14 @@ def test_reset_requires_reviewed_inputs(command):
         )
         assert result.returncode != 0
         assert required in result.stderr
+
+
+def test_s3_guide_defers_to_canonical_guarded_restore():
+    guide = RUNBOOK.parent / "k3s" / "etcd-s3-backups.md"
+    text = guide.read_text()
+    assert "../runbook.md#restoring-etcd-from-snapshots" in text
+    assert "../runbook.md#offline-restore-qualification-record" in text
+    assert "--cluster-reset" not in text
+    assert "restart k3s on all nodes" not in text
+    assert "about 14 days" in text
+    assert "four weeks of history" not in text
