@@ -318,22 +318,257 @@ policies.
    kubectl -n longhorn-system exec deploy/longhorn-driver-deployer -- longhorn manager backup ls
    ```
 
+### Ethernet DHCP and embedded etcd recovery
+
+This is a proposed operator-controlled procedure, not an automatic repair or a record of commands
+executed during the [October incident](../outages/2026-10-16-ethernet-dhcp-control-plane-recovery.md).
+Live qualification is tracked in [#2919](https://github.com/futuroptimist/sugarkube/issues/2919).
+Use one cluster at a time. Obtain a recovery window and name the operator who may authorize
+membership changes. Ethernet is the supported path here; do not introduce Wi-Fi failover, static
+address assignment, an upgrade, an uninstall, or a new cluster bootstrap as an incidental repair.
+
+#### 1. Classify before changing anything
+
+| Observed state | Decision |
+| --- | --- |
+| API and an etcd majority healthy; addresses agree | No membership reset. Investigate application, DNS, certificate, or monitoring failures independently. |
+| Two healthy voting members of the same three-member cluster, one failed member | Preserve the healthy majority. Repair only the failed member using a separately reviewed member-replacement procedure; never run `--cluster-reset` on this path. |
+| No healthy majority, but local databases available | Stop and isolate all servers, preserve every database, select one justified seed, then consider the existing-database reset below. |
+| Database corruption, uncertain cluster identity/freshness, or no defensible seed | Stop. Assess a verified snapshot and acceptable recovery point with the incident owner. Do not guess or force a new cluster. |
+
+Determine quorum from authenticated etcd endpoint health and membership, not SSH, mDNS, a
+successful API request alone, or Ready status. Check every reachable member's cluster/member ID,
+peer/client URLs, voter/learner state, term, committed/applied progress, alarms, and endpoint health.
+Use a compatible `etcdctl` with verified endpoint and CA/client credentials; K3s does not promise
+an installed `etcdctl`. Once those options are configured securely, read-only examples are:
+
+```bash
+etcdctl member list --write-out=table
+etcdctl endpoint status --cluster --write-out=table
+etcdctl endpoint health --cluster
+etcdctl alarm list
+```
+
+Do not publish their raw output. An unreachable endpoint is a failed check, not permission to
+remove it. See the upstream [etcd status checks](https://etcd.io/docs/v3.6/tasks/operator/how-to-check-cluster-status/)
+and [membership guidance](https://etcd.io/docs/v3.6/op-guide/runtime-configuration/).
+The single-member mechanism in [PR #2914](https://github.com/futuroptimist/sugarkube/pull/2914)
+is draft work requiring two surviving healthy members; it is not the all-node recovery procedure.
+
+#### 2. Establish identity and effective configuration
+
+Record cluster/environment, node name, machine identity, installed binary version, service unit,
+configuration path, data directory, and current Ethernet address on each server. Keep credentials,
+raw addresses, and machine-specific evidence in restricted incident storage. Example local reads:
+
+```bash
+k3s --version
+k3s server --help
+ip -4 -o addr show dev eth0 scope global
+systemctl show k3s -p FragmentPath -p DropInPaths -p ActiveState -p NRestarts
+```
+
+Privately inspect the unit, its environment files, command arguments, and the running process.
+These may contain secrets; do not paste them into an issue. Resolve any alternate `--config`,
+`K3S_CONFIG_FILE`, `--data-dir`, node name, server URL, and critical cluster flags. Compare configured
+SANs with the intended endpoint; a valid hostname lookup is not certificate or peer-health proof.
+
+The [K3s configuration reference](https://docs.k3s.io/installation/configuration) describes YAML
+and command-line precedence. Check base YAML plus alphabetically loaded drop-ins; later keys can
+replace earlier ones, and CLI flags override file settings. A foreground recovery invocation does
+not automatically inherit a systemd unit's environment or arguments. Build a reviewed, root-only
+recovery configuration containing the effective required settings and original identity before
+using the templates below. Preserve critical cluster settings across all members.
+
+For incident versions `v1.35.4+k3s1` and `v1.34.5+k3s1`, inspect their respective
+[agent flag definitions](https://github.com/k3s-io/k3s/blob/v1.35.4%2Bk3s1/pkg/cli/cmds/agent.go)
+and [production definitions](https://github.com/k3s-io/k3s/blob/v1.34.5%2Bk3s1/pkg/cli/cmds/agent.go).
+Do not assume `K3S_NODE_IP` or `K3S_FLANNEL_IFACE` is consumed merely because it appears in a
+service environment. Use supported YAML/flags and remove conflicting obsolete CLI overrides
+under review. This YAML fragment is a template; replace the placeholder with that node's verified
+current Ethernet address before use:
+
+```yaml
+node-ip: "<CURRENT_ETHERNET_IPV4>"
+flannel-iface: eth0
+```
+
+It is a recovery-time value, not a durable DHCP update mechanism. Do not copy another node's
+address or assume a generated file is effective. Keep the exact installed patch version during
+recovery; verify its help/source for every option. Runtime refresh remains tracked in
+[#2915](https://github.com/futuroptimist/sugarkube/issues/2915).
+
+#### 3. Preserve evidence and choose a seed
+
+Before any membership reset or peer database move:
+
+1. Confirm each server belongs to the intended cluster. Stop K3s on all servers and verify service
+   and process termination. Prevent unattended restarts and automation from starting any peer.
+   Account for unreachable servers by isolating them; inability to prove isolation is a stop condition.
+2. Preserve a cold copy of each server's effective data directory, token, configuration, service
+   definition/drop-ins, certificates, and node identity material with original permissions. Store
+   copies outside the directory that will be changed, with access controls and sufficient space.
+3. Verify copies can be read, inventories are complete, and checksums match after copying. Record
+   timestamps and cluster/node identity. Protect the token separately; it is required to decrypt
+   bootstrap data in backups. Neither hashes nor successful archive listing proves a valid restore.
+4. Compare the available members' committed/applied progress and history, database health, and last
+   known writes. Select one freshest defensible seed and document the basis and recovery-point risk.
+   Equal recorded indexes alone do not prove identical contents, latest writes, or correct identity.
+   If evidence conflicts or a potentially fresher member is missing, stop for an explicit decision.
+5. Preserve application-volume backups independently. Etcd state does not contain all application
+   data; a restored Kubernetes object or Bound PVC cannot validate volume contents.
+
+Use the [K3s backup prerequisites](https://docs.k3s.io/datastore/backup-restore) and the exact-version
+server help. The following commands are templates for an approved window, not commands to execute
+while writing or reviewing this documentation. `RECOVERY_CONFIG` must be an operator-set absolute
+path to the reviewed root-only configuration, with the correct token file, identity, and data path.
+Never place a token value on the command line. Do not set reset flags in persistent configuration.
+
+#### 4. Recover exactly one isolated seed
+
+For total quorum loss with a justified usable existing database, stop the service and perform
+one membership reset on the selected seed only:
+
+```bash
+sudo systemctl stop k3s
+sudo k3s server --config "${RECOVERY_CONFIG:?set reviewed recovery config}" --cluster-reset
+```
+
+This resets membership using the existing database; it does not select or restore a scheduled
+snapshot. Require a successful completion message and exit before restarting normally. Preserve
+failure output privately and stop on errors. Do not bypass the reset safety marker, repeat resets,
+or reset a second seed. Confirm persistent service configuration has the same intended settings
+and no reset/restore flags, then start only the seed:
+
+```bash
+sudo systemctl start k3s
+```
+
+Verify its API, cluster identity, one-member voting configuration, current address and lease before
+admitting peers. Do not mistake a fresh empty cluster for recovered state: inspect expected
+namespaces and representative pre-incident resources before continuing.
+
+#### 5. Bound Node status convergence
+
+Compare current `eth0` address, effective node IP, Node annotations, and `.status.addresses`
+independently. A current annotation does not prove a current InternalIP. With an explicitly selected
+`RECOVERY_CONTEXT` and verified `NODE_NAME`, these are read-only examples:
+
+```bash
+kubectl --context "${RECOVERY_CONTEXT:?select cluster}" get --raw='/readyz?verbose'
+kubectl --context "$RECOVERY_CONTEXT" get node "${NODE_NAME:?select node}" -o json
+kubectl --context "$RECOVERY_CONTEXT" -n kube-node-lease get lease "$NODE_NAME" -o yaml
+```
+
+Set a bounded observation window before beginning: proposed default is five minutes per node,
+checking every 15 seconds, with at most one deliberate restart after a reviewed configuration
+correction. These bounds are proposed operating limits, not measured recovery guarantees. Count
+unexpected restarts separately. Repeated network-policy interface failures, nonadvancing leases,
+or persistent obsolete InternalIP at the deadline require a stop, not a restart loop.
+
+A guarded seed status correction is an exceptional operator decision when the API is available,
+configuration and physical identity are proven, and stale status demonstrably blocks startup.
+Export the complete Node object privately first. Prepare a JSON Patch that tests both the object
+UID and the exact obsolete address before replacing only that InternalIP entry. Preserve Hostname,
+ExternalIP, other address families, and all unrelated status. Never replace the whole address list
+blindly or patch a peer preemptively. Review the patch against the freshly read object; any failed
+test or changed resource requires reassessment. The Kubernetes
+[status patch interface](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/update-api-object-kubectl-patch/)
+supports a separately targeted status update:
+
+```bash
+kubectl --context "$RECOVERY_CONTEXT" patch node "$NODE_NAME" \
+  --subresource=status --type=json --patch-file "${REVIEWED_STATUS_PATCH:?review patch first}"
+```
+
+This is not a general status ownership fix. Require subsequent kubelet/controller convergence and
+fresh leases. If status reverts or the loop persists, stop and retain the evidence for
+[#2917](https://github.com/futuroptimist/sugarkube/issues/2917); do not disable network policy as a
+shortcut. The reported October peer recovery converged without manual peer status correction.
+
+#### 6. Rejoin preserved peers sequentially
+
+Only after the seed passes its checks, choose one stopped peer with matching identity, exact
+version, critical flags, original token, supported Ethernet settings, and a reachable current seed
+join endpoint with valid TLS. Keep the other peer isolated. Confirm this peer's cold backup first.
+Move its old `server/db` directory to an operator-chosen, nonexisting preserved location outside
+the active database path; do not erase it. Verify the destination and ownership before starting.
+Do not move the seed's database or discard certificates/token/identity material. The active peer
+database must be absent so it can rejoin the recovered membership instead of reopening old state.
+
+Start this peer normally. Verify membership identity, healthy endpoint, learner promotion to voter,
+Node address convergence, and advancing leases within the bounded window. Require the seed to
+remain healthy. Only then repeat for the final peer. If a peer fails, stop that peer, preserve its
+new diagnostics and data, and keep the established members intact. Do not repeatedly remove/add
+members, run resets on peers, or start all old databases together.
+
+#### 7. Separate acceptance gates
+
+Record UTC start/end times, sample counts, and evidence location for each gate. The short October
+windows do not substitute for a future qualification soak. Proposed acceptance is at least
+15 minutes of healthy observations, plus a separately approved longer qualification window under
+[#2916](https://github.com/futuroptimist/sugarkube/issues/2916).
+
+| Gate | Required evidence |
+| --- | --- |
+| API | Authenticated readiness succeeds throughout the observation window. |
+| Etcd | Expected three members, three voters, healthy endpoints, no unexpected learners or alarms; progress consistent with activity. |
+| Addresses | Ethernet, effective config, Node status, peer/client endpoints and intended join configuration agree; endpoint TLS verifies. |
+| Leases and restarts | Each node's lease advances; all services remain active; restart counts stop increasing. |
+| Pod networking | Approved existing probes verify cross-node pod traffic, service routing, DNS, and expected network-policy allow/deny behavior. |
+| Workloads and storage | Expected deployments/daemonsets ready; jobs interpreted by purpose; storage mounts and application reads/writes validated under separate authorization. |
+| Monitoring | New samples after recovery, scrape targets healthy, alert transitions timestamped, watchdog and external probes independently verified. A loading dashboard is insufficient. |
+| Applications | Each affected service passes its owner-defined functional check, including chat where applicable; record internal and external results separately. |
+| Data | Reconcile representative pre-incident records and acknowledged writes; qualify backup restore in isolation. Record unknowns and possible recovery-point loss. |
+
+Useful read-only inventory complements, but does not replace, the gates:
+
+```bash
+kubectl --context "$RECOVERY_CONTEXT" get nodes -o wide
+kubectl --context "$RECOVERY_CONTEXT" -n kube-node-lease get leases
+kubectl --context "$RECOVERY_CONTEXT" get pods,deployments,daemonsets -A
+kubectl --context "$RECOVERY_CONTEXT" get pvc -A
+```
+
+#### Stop and rollback rules
+
+Stop on uncertain target/identity, missing token/configuration, unreadable backups, insufficient
+space, uncertain freshest seed, inability to isolate peers, TLS failures, unexpected membership,
+corruption alarms, status divergence, or failed bounded checks. Keep unaffected healthy members
+running when on the healthy-quorum path. During all-node recovery keep unrecovered peers stopped.
+
+Before a reset, a reviewed configuration rollback can restore saved configuration while all
+servers remain stopped; validate address correctness before starting anything. After a membership
+reset, old peer databases are forensic/recovery assets, not a safe rolling rollback. Do not copy
+one back into a running new membership. Preserve the new state too, isolate the cluster, and have
+the owner select a coherent recovery point and a new reviewed plan. Retain backups until data
+validation and owner acceptance, with monitoring verification tracked in
+[#2918](https://github.com/futuroptimist/sugarkube/issues/2918).
+
 ### Restoring etcd from snapshots
 
-1. Stop k3s on all control-plane nodes.
-2. Copy the desired snapshot from `/var/lib/rancher/k3s/server/db/snapshots` or download it from the
-   remote S3 bucket.
-3. Restore the snapshot on a single control-plane node:
+Snapshot restoration is a separate recovery-point decision. It was not demonstrated by the
+October incident. Apply the identity, isolation, backup, configuration, sequential rejoin, and
+acceptance gates above. Select a trusted snapshot with its original server token and verify its
+provenance, checksum, version compatibility, and expected data age. First qualify the restore in
+an isolated environment; obtain explicit acceptance of potential lost writes before live use.
 
-   ```bash
-   sudo k3s server \
-     --cluster-init \
-     --cluster-reset \
-     --cluster-reset-restore-path /var/lib/rancher/k3s/server/db/snapshots/<snapshot>
-   ```
+With all servers stopped and exactly one selected seed, the reviewed local-snapshot template is:
 
-4. Remove the reset flags from `/etc/rancher/k3s/config.yaml`, restart k3s on the remaining nodes,
-   and confirm the etcd members rejoin.
+```bash
+sudo k3s server --config "${RECOVERY_CONFIG:?set reviewed recovery config}" \
+  --cluster-reset --cluster-reset-restore-path "${VERIFIED_SNAPSHOT:?select verified snapshot}" \
+  --etcd-s3=false
+```
+
+The local path must be absolute. The S3 override prevents inherited remote settings from changing
+local snapshot selection. Remote restores need a separately reviewed configuration accessible
+without the Kubernetes API; do not put credentials in shell history. After successful completion,
+start the seed without reset flags and rejoin peers using the preserved-database procedure above.
+Do not simply restart peers with their obsolete databases. Follow the upstream
+[K3s reset and restore reference](https://docs.k3s.io/cli/etcd-snapshot) and check exact-version
+behavior before use. Restore testing and application-data proof remain open in
+[#2919](https://github.com/futuroptimist/sugarkube/issues/2919).
 
 ## 7. Promotion flow
 
