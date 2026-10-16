@@ -299,8 +299,14 @@ does not hide invalid evidence. If no first scrape arrives before the retry budg
 expires, verification fails with the existing timeout diagnostics. The sentinel
 with any other health value remains invalid.
 
-Stale evidence exits 10 so the existing bounded polling loop can retry; invalid
-structure, invalid timestamps and non-finite values exit 9. Neither can report
+Stale evidence is accumulated across the entire bundle and exits 10 so the existing
+bounded polling loop can retry. On the final attempt, the timeout summary identifies
+owned app/route/environment labels and a sorted `stale_evidence` list containing
+only `lastScrape` and required metric-family names. Stale rows report
+`probe_success: unknown`; unrecognized target health strings are reported as
+`invalid` rather than echoed. No raw timestamps, URLs, extra labels or payloads are
+included. Invalid evidence later in the bundle still exits 9 instead of being
+hidden by an earlier stale timestamp. Stale or invalid evidence cannot report
 success. `--probes` still validates configuration only and does not require runtime
 timestamps. There is no legacy option that accepts missing timestamps.
 

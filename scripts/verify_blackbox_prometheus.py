@@ -115,8 +115,7 @@ def fresh(timestamp, description):
     timestamp = positive_finite(timestamp, description)
     if timestamp > EVALUATION_TIME:
         fail(f"{description} is in the future.")
-    if EVALUATION_TIME - timestamp > MAX_AGE:
-        fail(f"{description} is stale.", 10)
+    return EVALUATION_TIME - timestamp <= MAX_AGE
 
 
 def scrape_timestamp(value):
@@ -166,6 +165,7 @@ active = target_data.get("activeTargets")
 if not isinstance(active, list):
     fail("Prometheus targets response has an invalid activeTargets field.")
 discovered = {}
+stale = {}
 for item in active:
     if not isinstance(item, dict) or not isinstance(item.get("labels"), dict):
         fail("Prometheus targets response contains an invalid target.")
@@ -182,8 +182,10 @@ for item in active:
     # Prometheus uses Go's zero time while a discovered target awaits its first scrape.
     # Keep validating the rest of the bundle; unknown health cannot satisfy recovery.
     pending = health == "unknown" and item.get("lastScrape") == "0001-01-01T00:00:00Z"
-    if not pending:
-        fresh(scrape_timestamp(item.get("lastScrape")), "Prometheus target lastScrape")
+    if not pending and not fresh(
+        scrape_timestamp(item.get("lastScrape")), "Prometheus target lastScrape"
+    ):
+        stale.setdefault(key, set()).add("lastScrape")
     discovered[key] = health
 
 metrics = document["metrics"]
@@ -213,7 +215,8 @@ for family, raw in metrics.items():
             fail(f"{family} response contains an invalid sample value.")
         if isinstance(value[0], bool) or not isinstance(value[0], (int, float)):
             fail(f"{family} response contains an invalid sample timestamp.")
-        fresh(value[0], f"{family} sample timestamp")
+        if not fresh(value[0], f"{family} sample timestamp"):
+            stale.setdefault(key, set()).add(family)
         try:
             numeric = float(value[1])
         except ValueError:
@@ -227,7 +230,7 @@ for family, raw in metrics.items():
 
 healthy = set(discovered) == set(EXPECTED.values()) and all(v == "up" for v in discovered.values())
 complete = all(values == set(EXPECTED.values()) for values in metric_sets.values())
-if healthy and complete and not zero:
+if healthy and complete and not zero and not stale:
     if args.report_json:
         print(
             json.dumps(
@@ -247,22 +250,28 @@ if healthy and complete and not zero:
             )
         )
     raise SystemExit(0)
+if stale:
+    sources = ", ".join(sorted(set().union(*stale.values())))
+    print(f"ERROR: evidence is stale ({sources}).", file=sys.stderr)
 if os.environ.get("FINAL_ATTEMPT") == "1":
     print(
         f"ERROR: {ENVIRONMENT} blackbox verification did not converge before timeout.",
         file=sys.stderr,
     )
     for app, route, environment in sorted(EXPECTED.values()):
-        health = discovered.get((app, route, environment), "missing")
+        key = (app, route, environment)
+        health = discovered.get(key, "missing")
+        if health not in {"up", "down", "unknown", "missing"}:
+            health = "invalid"
         series = (
             "present"
             if all((app, route, environment) in value for value in metric_sets.values())
             else "missing"
         )
         success = (
-            "down"
-            if (app, route, environment) in zero
-            else "unknown" if series == "missing" else "up"
+            "unknown"
+            if key in stale
+            else "down" if key in zero else "unknown" if series == "missing" else "up"
         )
         print(
             json.dumps(
@@ -273,6 +282,7 @@ if os.environ.get("FINAL_ATTEMPT") == "1":
                     "health": health,
                     "series": series,
                     "probe_success": success,
+                    "stale_evidence": sorted(stale.get(key, ())),
                 },
                 sort_keys=True,
             ),

@@ -1222,6 +1222,14 @@ def test_lifecycle_wrapper_retries_stale_evidence_then_fails(scenario, source):
     result = scenario.run("verify")
     assert result.returncode == 10
     assert "is stale" in result.stderr
+    assert "did not converge before timeout" in result.stderr
+    rows = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    labels = payload["targets"]["data"]["activeTargets"][0]["labels"]
+    row = next(
+        row for row in rows if row["app"] == labels["app"] and row["route"] == labels["route"]
+    )
+    assert row["stale_evidence"] == ["lastScrape" if source == "scrape" else "probe_success"]
+    assert row["probe_success"] == "unknown"
     assert "retrying" in result.stderr
     assert "are healthy" not in result.stdout
     assert not mutations(scenario.log)
@@ -1289,3 +1297,60 @@ def test_pending_target_does_not_bypass_other_evidence_checks(invalid):
     assert result.returncode == (10 if invalid == "stale" else 9)
     assert "probe_duration_seconds" in result.stderr
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_stale_timeout_reports_all_owned_evidence_without_private_payloads(environment):
+    payload = verifier_bundle(environment=environment)
+    targets = payload["targets"]["data"]["activeTargets"]
+    for target in targets:
+        target["lastScrape"] = "2026-10-15T23:57:59Z"
+        target["scrapeUrl"] = "https://private.invalid/secret"
+    targets[0]["health"] = "private-health-secret"
+    for family in payload["metrics"].values():
+        for sample in family["data"]["result"]:
+            sample["value"][0] -= 121
+            sample["metric"]["instance"] = "private-instance-secret"
+    result = verify(payload, True, "--report-json", environment=environment)
+    assert result.returncode == 10
+    assert result.stdout == ""
+    assert "did not converge before timeout" in result.stderr
+    rows = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    assert len(rows) == len(targets)
+    assert len(result.stderr.splitlines()) <= len(targets) + 2
+    expected_fields = sorted(["lastScrape", *payload["metrics"]])
+    for row in rows:
+        assert row["stale_evidence"] == expected_fields
+        assert row["probe_success"] == "unknown"
+        assert row["environment"] == environment
+    assert any(row["health"] == "invalid" for row in rows)
+    for private in ("private", "secret", "https://", "2026-10-15"):
+        assert private not in result.stderr
+
+
+@pytest.mark.parametrize("source", ["scrape", "vector"])
+@pytest.mark.parametrize(
+    "invalid", ["target_missing", "target_future", "sample_missing", "sample_future", "nan", "inf"]
+)
+def test_stale_evidence_does_not_hide_later_invalid_evidence(source, invalid):
+    payload = verifier_bundle()
+    targets = payload["targets"]["data"]["activeTargets"]
+    samples = payload["metrics"]["probe_success"]["data"]["result"]
+    if source == "scrape":
+        targets[0]["lastScrape"] = "2026-10-15T23:57:59Z"
+    else:
+        samples[0]["value"][0] -= 121
+    if invalid == "target_missing":
+        targets[1].pop("lastScrape")
+    elif invalid == "target_future":
+        targets[1]["lastScrape"] = "2026-10-16T00:00:01Z"
+    elif invalid == "sample_missing":
+        samples[1]["value"][0] = None
+    elif invalid == "sample_future":
+        samples[1]["value"][0] += 1
+    else:
+        samples[0]["value"][1] = "NaN" if invalid == "nan" else "Inf"
+    result = verify(payload, True, "--report-json")
+    assert result.returncode == 9
+    assert result.stdout == ""
+    assert "did not converge" not in result.stderr
