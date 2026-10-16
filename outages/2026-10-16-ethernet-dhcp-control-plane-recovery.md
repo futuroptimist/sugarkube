@@ -1,10 +1,15 @@
 # Outage report: Ethernet DHCP changes and control-plane recovery
 
-**Record date:** 2026-10-16 (UTC; retrospective written after recovery)  
-**Observed incident date:** 2026-10-15 UTC / 2026-10-14 Pacific  
-**Component:** K3s embedded etcd membership, runtime networking, and Node address convergence  
-**Severity:** Critical; staging and production control planes affected  
-**Status:** Service recovery observed; durable prevention and recovery qualification open  
+**Record date:** 2026-10-16 (UTC; retrospective written after recovery)
+
+**Observed incident date:** 2026-10-15 UTC / 2026-10-14 Pacific
+
+**Component:** K3s embedded etcd membership, runtime networking, and Node address convergence
+
+**Severity:** Critical; staging and production control planes affected
+
+**Status:** Service recovery observed; durable prevention and recovery qualification open
+
 **Incident owner:** [futuroptimist](https://github.com/futuroptimist)
 
 ## Summary and impact
