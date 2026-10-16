@@ -121,3 +121,33 @@ def test_cli_rejects_invalid_json_without_echoing_input(tmp_path):
     assert result.returncode == 1
     assert "invalid-content-not-to-echo" not in result.stdout + result.stderr
     assert json.loads(result.stdout)["live_qualified"] is False
+
+
+@pytest.mark.parametrize("section", ["artifact", "backup", "seed", "measurements", "gates"])
+def test_every_required_field_is_required(record, section):
+    for key in list(record[section]):
+        value = record[section].pop(key)
+        assert validate(record)
+        record[section][key] = value
+
+
+def test_recovery_cannot_precede_incident(record):
+    record["measurements"].update(
+        started_utc="2026-09-30T23:00:00Z", accepted_utc="2026-09-30T23:30:00Z"
+    )
+    assert validate(record)
+
+
+def test_duplicate_json_fields_rejected(tmp_path):
+    path = tmp_path / "duplicate.json"
+    source = FIXTURE.read_text().replace(
+        '"recovery": "completed"', '"recovery": "interrupted", "recovery": "completed"'
+    )
+    path.write_text(source)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/validate_restore_evidence.py"), str(path)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["record_complete"] is False

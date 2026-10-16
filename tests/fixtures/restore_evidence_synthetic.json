@@ -151,6 +151,10 @@
     "operator_acceptance": {
       "status": "pass",
       "evidence_ref": "synthetic-operator_acceptance"
+    },
+    "data_restore_approved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-data-restore-approval"
     }
   }
 }

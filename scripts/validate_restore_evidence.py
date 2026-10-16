@@ -21,6 +21,7 @@ GATES = (
     "all_servers_stopped",
     "seed_selection_approved",
     "reset_approved",
+    "data_restore_approved",
     "restore_completed",
     "seed_objects_verified",
     "peer_data_preserved",
@@ -127,11 +128,16 @@ def validate(record):
     for key in ("recovered_through_utc", "incident_utc", "started_utc", "accepted_utc"):
         value = measurements.get(key)
         try:
-            if not isinstance(value, str) or not value.endswith("Z"):
+            if not matches(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
                 raise ValueError
             times[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             errors.append(f"measurements: invalid UTC {key}")
+    if "incident_utc" in times and "started_utc" in times:
+        require(
+            times["started_utc"] >= times["incident_utc"],
+            "measurements: recovery starts before incident",
+        )
     for metric, start, end in (
         ("rpo", "recovered_through_utc", "incident_utc"),
         ("rto", "started_utc", "accepted_utc"),
@@ -158,12 +164,22 @@ def validate(record):
     return errors
 
 
+def unique_fields(pairs):
+    """Reject ambiguous duplicate JSON fields without echoing their contents."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
     try:
-        errors = validate(json.loads(args.manifest.read_text()))
+        errors = validate(json.loads(args.manifest.read_text(), object_pairs_hook=unique_fields))
     except (OSError, ValueError, TypeError):
         # Do not echo potentially sensitive file contents or locations.
         errors = ["Unable to read a valid JSON evidence record"]

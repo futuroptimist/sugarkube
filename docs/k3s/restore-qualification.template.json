@@ -149,6 +149,10 @@
     "operator_acceptance": {
       "status": "not_run",
       "evidence_ref": null
+    },
+    "data_restore_approved": {
+      "status": "not_run",
+      "evidence_ref": null
     }
   }
 }
