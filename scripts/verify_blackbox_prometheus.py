@@ -179,7 +179,11 @@ for item in active:
         fail("Prometheus target contains invalid lifecycle-owned labels.")
     if key in discovered:
         fail("Prometheus targets contain a duplicate lifecycle-owned target.")
-    fresh(scrape_timestamp(item.get("lastScrape")), "Prometheus target lastScrape")
+    # Prometheus uses Go's zero time while a discovered target awaits its first scrape.
+    # Keep validating the rest of the bundle; unknown health cannot satisfy recovery.
+    pending = health == "unknown" and item.get("lastScrape") == "0001-01-01T00:00:00Z"
+    if not pending:
+        fresh(scrape_timestamp(item.get("lastScrape")), "Prometheus target lastScrape")
     discovered[key] = health
 
 metrics = document["metrics"]

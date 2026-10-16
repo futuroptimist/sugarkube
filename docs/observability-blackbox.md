@@ -291,6 +291,14 @@ Every required metric value must also be finite, including duration, DNS, HTTP
 status and certificate expiry. Existing label, completeness and success checks
 still apply. Unrelated jobs remain outside the owned matrix.
 
+A newly discovered target with exactly `health: unknown` and the never-scraped
+`lastScrape: 0001-01-01T00:00:00Z` sentinel remains pending: verification exits 10
+and the existing bounded polling loop retries. It cannot produce a success report.
+Other targets and all returned metrics are still validated, so pending discovery
+does not hide invalid evidence. If no first scrape arrives before the retry budget
+expires, verification fails with the existing timeout diagnostics. The sentinel
+with any other health value remains invalid.
+
 Stale evidence exits 10 so the existing bounded polling loop can retry; invalid
 structure, invalid timestamps and non-finite values exit 9. Neither can report
 success. `--probes` still validates configuration only and does not require runtime

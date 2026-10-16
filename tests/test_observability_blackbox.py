@@ -239,6 +239,13 @@ elif "--raw" in joined:
     else:
         family = next(name for name in bundle["metrics"] if name in joined)
         payload = bundle["metrics"][family]
+    if scenario == "persistent_pending" or (scenario == "pending_then_fresh" and count < 6):
+        if "targets?" in joined:
+            target = payload["data"]["activeTargets"][0]
+            target["health"] = "unknown"
+            target["lastScrape"] = "0001-01-01T00:00:00Z"
+        else:
+            payload["data"]["result"].pop(0)
     print(json.dumps(payload))
 """
 
@@ -1229,3 +1236,56 @@ def test_regained_node_heartbeat_cannot_replace_missing_monitoring_target():
     assert result.returncode == 10
     assert result.stdout == ""
     assert '"health": "missing"' in result.stderr
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+@pytest.mark.parametrize("state,code", [("pending_then_fresh", 0), ("persistent_pending", 10)])
+def test_lifecycle_wrapper_retries_never_scraped_targets(scenario, environment, state, code):
+    result = scenario.run(
+        "verify",
+        environment,
+        SCENARIO=state,
+        KUBECONFIG=scenario.root / "prod.config" if environment == "prod" else "",
+    )
+    assert result.returncode == code
+    assert "retrying" in result.stderr
+    assert sum("/api/v1/targets?state=active" in line for line in scenario.log) == 2
+    assert sum(line.startswith("sleep ") for line in scenario.log) == 1
+    if code == 0:
+        assert "are healthy" in result.stdout
+    else:
+        assert "are healthy" not in result.stdout
+        assert "did not converge before timeout" in result.stderr
+        assert '"health": "unknown"' in result.stderr
+        assert '"series": "missing"' in result.stderr
+    assert not mutations(scenario.log)
+
+
+@pytest.mark.parametrize("health,code", [("unknown", 10), ("up", 9), ("down", 9)])
+def test_never_scraped_sentinel_requires_unknown_health(health, code):
+    payload = verifier_bundle()
+    target = payload["targets"]["data"]["activeTargets"][0]
+    target.update(health=health, lastScrape="0001-01-01T00:00:00Z")
+    result = verify(payload, True, "--report-json")
+    assert result.returncode == code
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("invalid", ["malformed", "future", "nonfinite", "stale"])
+def test_pending_target_does_not_bypass_other_evidence_checks(invalid):
+    payload = verifier_bundle()
+    target = payload["targets"]["data"]["activeTargets"][0]
+    target.update(health="unknown", lastScrape="0001-01-01T00:00:00Z")
+    sample = payload["metrics"]["probe_duration_seconds"]["data"]["result"][1]
+    if invalid == "malformed":
+        sample["value"][0] = None
+    elif invalid == "future":
+        sample["value"][0] += 1
+    elif invalid == "nonfinite":
+        sample["value"][1] = "NaN"
+    else:
+        sample["value"][0] -= 121
+    result = verify(payload, False, "--report-json")
+    assert result.returncode == (10 if invalid == "stale" else 9)
+    assert "probe_duration_seconds" in result.stderr
+    assert result.stdout == ""
