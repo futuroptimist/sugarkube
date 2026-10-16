@@ -3,7 +3,7 @@
   "date": "2026-10-16",
   "component": "K3s embedded etcd and Ethernet DHCP recovery",
   "rootCause": "Observed October 15 UTC: obsolete numeric etcd peer and join endpoints survived Ethernet DHCP changes while mDNS remained usable. Stale Node status addresses coincided with network-policy startup loops even after supported configuration was present. Exact onset and external power/WAN causality remain unknown.",
-  "resolution": "Owner reported cold backups, one existing-database seed membership reset per cluster, preserved peer databases, sequential rejoin, supported Ethernet YAML, and guarded seed status correction. Short staging and production checks succeeded; no zero-data-loss or snapshot-restore claim. Prevention and live qualification remain open.",
+  "resolution": "Cold backups, one existing-database seed membership reset per cluster, preserved peer databases, sequential rejoin, supported Ethernet YAML, and guarded seed status correction were reported. Short staging and production checks succeeded; no zero-data-loss or snapshot-restore claim. Prevention and live qualification remain open.",
   "references": [
     "outages/2026-10-16-ethernet-dhcp-control-plane-recovery.md",
     "docs/runbook.md",

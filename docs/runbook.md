@@ -334,7 +334,7 @@ address assignment, an upgrade, an uninstall, or a new cluster bootstrap as an i
 | API and an etcd majority healthy; addresses agree | No membership reset. Investigate application, DNS, certificate, or monitoring failures independently. |
 | Two healthy voting members of the same three-member cluster, one failed member | Preserve the healthy majority. Repair only the failed member using a separately reviewed member-replacement procedure; never run `--cluster-reset` on this path. |
 | No healthy majority, but local databases available | Stop and isolate all servers, preserve every database, select one justified seed, then consider the existing-database reset below. |
-| Database corruption, uncertain cluster identity/freshness, or no defensible seed | Stop. Assess a verified snapshot and acceptable recovery point with the incident owner. Do not guess or force a new cluster. |
+| Database corruption, uncertain cluster identity/freshness, or no defensible seed | Stop. Require explicit operator approval of a verified snapshot and acceptable recovery point. Do not guess or force a new cluster. |
 
 Determine quorum from authenticated etcd endpoint health and membership, not SSH, mDNS, a
 successful API request alone, or Ready status. Check every reachable member's cluster/member ID,
@@ -543,7 +543,7 @@ windows do not substitute for a future qualification soak. Proposed acceptance i
 | Pod networking | Approved existing probes verify cross-node pod traffic, service routing, DNS, and expected network-policy allow/deny behavior. |
 | Workloads and storage | Expected deployments/daemonsets ready; jobs interpreted by purpose; storage mounts and application reads/writes validated under separate authorization. |
 | Monitoring | New samples after recovery, scrape targets healthy, alert transitions timestamped, watchdog and external probes independently verified. A loading dashboard is insufficient. |
-| Applications | Each affected service passes its owner-defined functional check, including chat where applicable; record internal and external results separately. |
+| Applications | Each affected service passes its approved service-specific functional check, including chat where applicable; record internal and external results separately. |
 | Data | Reconcile representative pre-incident records and acknowledged writes; qualify backup restore in isolation. Record unknowns and possible recovery-point loss. |
 
 Useful read-only inventory complements, but does not replace, the gates:
@@ -565,9 +565,9 @@ running when on the healthy-quorum path. During all-node recovery keep unrecover
 Before a reset, a reviewed configuration rollback can restore saved configuration while all
 servers remain stopped; validate address correctness before starting anything. After a membership
 reset, old peer databases are forensic/recovery assets, not a safe rolling rollback. Do not copy
-one back into a running new membership. Preserve the new state too, isolate the cluster, and have
-the owner select a coherent recovery point and a new reviewed plan. Retain backups until data
-validation and owner acceptance, with monitoring verification tracked in
+one back into a running new membership. Preserve the new state too, isolate the cluster, and require
+explicit operator approval of a coherent recovery point and a new reviewed plan. Retain backups
+until data validation and explicit operator acceptance, with monitoring verification tracked in
 [#2918](https://github.com/futuroptimist/sugarkube/issues/2918).
 
 ### Restoring etcd from snapshots

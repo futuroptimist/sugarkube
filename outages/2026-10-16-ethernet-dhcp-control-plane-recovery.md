@@ -10,7 +10,7 @@
 
 **Status:** Service recovery observed; durable prevention and recovery qualification open
 
-**Incident owner:** [futuroptimist](https://github.com/futuroptimist)
+**Reported by:** [futuroptimist](https://github.com/futuroptimist)
 
 ## Summary and impact
 
@@ -21,19 +21,19 @@ The staging API was unavailable during repeated elections. Production later show
 address drift and services stuck activating. Exact onset and total user-impact duration remain
 unknown. Recovery checks establish short successful observation windows, not continuous availability.
 
-Hostname discovery remained usable: the owner could reach staging through `.local` names.
+Hostname discovery remained usable: staging could be reached through `.local` names.
 That did not update persisted numeric etcd membership. A second failure layer remained after
 supported Ethernet configuration was present: obsolete Node status addresses coincided with
 network-policy-controller startup failures. Static address assignment is intentionally not the
 durable solution. Wi-Fi failover is outside this incident's recovery scope.
 
-The owner reported recovery using existing databases, cold backups, one seed per cluster,
+Recovery was reported to have used existing databases, cold backups, one seed per cluster,
 and sequential peer rejoin. There is no evidence of a scheduled-snapshot restore or destructive
 rebuild. These observations do not establish zero data loss or a completed restore test.
 
 ## Evidence and its limits
 
-This report summarizes sanitized owner command transcripts and explicitly identified owner
+This report summarizes sanitized command transcripts and explicitly identified recovery
 reports. It does not publish raw logs, private discussion links, address values, or credentials.
 The retained diagnostics support the timeline below. Complete commands and outputs for every
 backup, reset, and rejoin operation were not retained in the supplied evidence.
@@ -57,7 +57,7 @@ All times in this table are **October 15 UTC**, seven hours ahead of **October 1
 | 04:26:35–04:27:38 | 21:26:35–21:27:38 | Four staging checks succeeded: three Ready nodes, three voters, fresh advancing leases. Node5 status converged to its current address. This is a short stability window. |
 | 04:29 | 21:29 | Production audit found changed Ethernet addresses, obsolete numeric join/peer endpoints and old SANs, and activating services. All three recorded commit index `69212322`; equality is not complete integrity evidence. |
 | 04:57:14–04:58:16 | 21:57:14–21:58:16 | Four production checks succeeded: current addresses, three Ready nodes and voters, advancing leases, active services, and unchanged restart counts `7/7/3`. |
-| Approximately 05:01 | Approximately 22:01 | Conversation-timed evidence showed ready workloads/running containers, ordinary completed Helm jobs, and a Bound 128 GiB Prometheus PVC. The owner reported danielsmith.io, token.place chat, Grafana, and watchdog working. Independent monitoring freshness and application data reconciliation remain unproven. |
+| Approximately 05:01 | Approximately 22:01 | Conversation-timed evidence showed ready workloads/running containers, ordinary completed Helm jobs, and a Bound 128 GiB Prometheus PVC. The availability of danielsmith.io, token.place chat, Grafana, and watchdog was reported. Independent monitoring freshness and application data reconciliation remain unproven. |
 
 ## Failure analysis
 
@@ -79,12 +79,12 @@ All times in this table are **October 15 UTC**, seven hours ahead of **October 1
    uses kube-router components. This source supports the integration attribution, but the supplied
    diagnostics do not identify every internal call or prove a single upstream defect.
 
-## Recovery performed, as reported by the owner
+## Reported recovery
 
-The owner reported readable, hashed cold backups; a single-seed membership reset using each
-cluster's existing database; preservation of peer databases before sequential rejoin; supported
-Ethernet YAML; and a guarded correction of the seed's Node status address. Peer status addresses
-self-corrected. Full command provenance for those operations is incomplete, so the command
+Readable, hashed cold backups were reported, along with a single-seed membership reset using
+each cluster's existing database, preservation of peer databases before sequential rejoin,
+supported Ethernet YAML, and a guarded correction of the seed's Node status address. Peer status
+addresses self-corrected. Full command provenance for those operations is incomplete, so the command
 examples in the [golden recovery runbook](../docs/runbook.md#ethernet-dhcp-and-embedded-etcd-recovery)
 are proposed reproducible procedures, not a reconstruction of commands known to have run.
 
@@ -94,13 +94,13 @@ monitoring independently detected recovery, or that another DHCP event would rec
 
 ## Corrective work and acceptance
 
-| Follow-up | Required outcome |
-| --- | --- |
-| [#2915: effective runtime configuration](https://github.com/futuroptimist/sugarkube/issues/2915) | Verify supported node IP and Flannel settings reach the exact running version, including precedence and restart behavior. |
-| [#2916: state-preserving Ethernet DHCP recovery](https://github.com/futuroptimist/sugarkube/issues/2916) | Qualify address churn without static IP dependence, data erasure, or Wi-Fi assumptions. |
-| [#2917: stale Node InternalIP loops](https://github.com/futuroptimist/sugarkube/issues/2917) | Bound convergence and recovery of status/config disagreement; cover seed and peers. |
-| [#2918: independent monitoring verification](https://github.com/futuroptimist/sugarkube/issues/2918) | Verify fresh scrapes, alert clocks, watchdog behavior, and external application probes separately. |
-| [#2919: backup, restore, and lost-quorum qualification](https://github.com/futuroptimist/sugarkube/issues/2919) | Demonstrate readable backups plus isolated restore/data validation and operator-controlled all-node recovery. |
+| Follow-up | Priority | Required outcome |
+| --- | --- | --- |
+| [#2915: effective runtime configuration](https://github.com/futuroptimist/sugarkube/issues/2915) | P0 | Verify supported node IP and Flannel settings reach the exact running version, including precedence and restart behavior. |
+| [#2916: state-preserving Ethernet DHCP recovery](https://github.com/futuroptimist/sugarkube/issues/2916) | P0 | Qualify address churn without static IP dependence, data erasure, or Wi-Fi assumptions. |
+| [#2917: stale Node InternalIP loops](https://github.com/futuroptimist/sugarkube/issues/2917) | P0 | Bound convergence and recovery of status/config disagreement; cover seed and peers. |
+| [#2918: independent monitoring verification](https://github.com/futuroptimist/sugarkube/issues/2918) | P2 | Verify fresh scrapes, alert clocks, watchdog behavior, and external application probes separately. |
+| [#2919: backup, restore, and lost-quorum qualification](https://github.com/futuroptimist/sugarkube/issues/2919) | P2 | Demonstrate readable backups plus isolated restore/data validation and operator-controlled all-node recovery. |
 
 [PR #2914](https://github.com/futuroptimist/sugarkube/pull/2914) is a separate draft implementation
 at `0055eecc` with green CI at the time of this report. Its startup refresh and opt-in recovery
