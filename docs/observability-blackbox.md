@@ -276,3 +276,80 @@ applied. Production Probe ownership is provided by the guarded manual lifecycle 
 not claimed live. Any future Flux adoption
 of the exporter, policy, or staging Probes must first retire the manual lifecycle and
 must never manage the same Helm release or Probe object names simultaneously.
+
+## Freshness and independent recovery evidence
+
+For [issue #2918](https://github.com/futuroptimist/sugarkube/issues/2918),
+`scripts/verify_blackbox_prometheus.py` validates each owned target's `lastScrape`
+and each required vector timestamp against one evaluation time. The default is
+wall-clock Unix time captured after reading the bundle, with a maximum age of
+120 seconds (two configured 60-second Probe intervals). The inclusive valid
+window is `evaluation_time - max_age_seconds <= timestamp <= evaluation_time`.
+There is no future-clock tolerance; correct clock skew before accepting evidence.
+Missing, malformed, zero, negative, non-finite, or future timestamps fail closed.
+Every required metric value must also be finite, including duration, DNS, HTTP
+status and certificate expiry. Existing label, completeness and success checks
+still apply. Unrelated jobs remain outside the owned matrix.
+
+A newly discovered target with exactly `health: unknown` and the never-scraped
+`lastScrape: 0001-01-01T00:00:00Z` sentinel remains pending: verification exits 10
+and the existing bounded polling loop retries. It cannot produce a success report.
+Other targets and all returned metrics are still validated, so pending discovery
+does not hide invalid evidence. If no first scrape arrives before the retry budget
+expires, verification fails with the existing timeout diagnostics. The sentinel
+with any other health value remains invalid.
+
+Stale evidence is accumulated across the entire bundle and exits 10 so the existing
+bounded polling loop can retry. On the final attempt, the timeout summary identifies
+owned app/route/environment labels and a sorted `stale_evidence` list containing
+only `lastScrape` and required metric-family names. Stale rows report
+`probe_success: unknown`; unrecognized target health strings are reported as
+`invalid` rather than echoed. No raw timestamps, URLs, extra labels or payloads are
+included. Invalid evidence later in the bundle still exits 9 instead of being
+hidden by an earlier stale timestamp. Stale or invalid evidence cannot report
+success. `--probes` still validates configuration only and does not require runtime
+timestamps. There is no legacy option that accepts missing timestamps.
+
+For offline replay, explicitly supply the observation's evaluation time and a
+reviewed positive age bound; do not choose a historical evaluation time to claim
+current recovery. For example, with a sanitized, separately collected bundle:
+
+```bash
+python3 scripts/verify_blackbox_prometheus.py --env staging \
+  --evaluation-time 1792108800 --max-age-seconds 120 --report-json < bundle.json
+```
+
+The Unix time above is a synthetic fixture time, not an incident observation.
+Both options must be positive finite numbers. Omitting them preserves the existing
+CLI invocation while enforcing current freshness. `--report-json` emits a bounded
+report only on success: environment, evaluation time, age bound, owned target
+count and fresh blackbox evidence. Failure emits no success report. The report
+contains no URLs, payloads, credentials or external client identifiers.
+
+Prometheus instant-vector timestamps describe query evaluation, not necessarily
+original sample collection. Checking them rejects old response bundles;
+`lastScrape` independently bounds scrape recency. This does not establish the
+original collection time of every metric or continuous health between observations.
+A successful report proves only that the supplied blackbox evidence meets these
+checks. It does not authenticate a saved bundle or establish full recovery.
+
+Keep the following recovery evidence independent:
+
+| Gate | Evidence and remaining boundary |
+| --- | --- |
+| Node reachability | Existing host heartbeat path; does not prove Kubernetes or monitoring health. Not evaluated here. |
+| API and member health | Separate control-plane observations; not inferred from node heartbeat or probes. Not evaluated here. |
+| Prometheus and scrape freshness | This validator checks owned target health, recent scrape and vector timestamps, complete finite metrics and successful probes. |
+| Alertmanager and external resolution | Existing watchdog delivery and external fire/resolve observations remain a separate human gate; not evaluated here. Never manually ping a capability URL as stack evidence. |
+| Application functionality | Successful configured blackbox routes do not prove sampled user journeys. A failed probe still fails even when scrape evidence is fresh. |
+
+The existing [alerting inventory](observability-alerting.md#3-external-heartbeats)
+and [watchdog runbook](observability-operations.md#observability-watchdog) retain
+ownership of node heartbeats, watchdog timing and external delivery. This report
+cannot substitute for them. In a retained recovery timeline, record each gate's
+actual observation time and mark unobserved intervals unknown; do not infer outage
+onset from the first retained diagnostic or resolution from resumed node pings.
+Repository fixtures are synthetic tests, not live evidence. Issue #2918 remains
+open for separately authorized human validation, including delayed external
+resolution and sampled application journeys. No alert routing or recovery
+controller changes are part of this freshness contract.

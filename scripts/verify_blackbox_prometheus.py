@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Privacy-safe validation of blackbox Prometheus API responses."""
 
+import argparse
 import json
+import math
 import os
+import re
 import sys
+import time
+from datetime import datetime
 
 ROUTES = {
     "dspace": ("root", "config", "healthz", "livez"),
@@ -18,9 +23,11 @@ PRODUCTION_APPS = {"dspace", "tokenplace", "danielsmith"}
 
 
 def expected(environment):
-    routes = ROUTES if environment == "staging" else {
-        app: app_routes for app, app_routes in ROUTES.items() if app in PRODUCTION_APPS
-    }
+    routes = (
+        ROUTES
+        if environment == "staging"
+        else {app: app_routes for app, app_routes in ROUTES.items() if app in PRODUCTION_APPS}
+    )
     return {
         f"blackbox-{app}-{environment}-{route}": (app, route, environment)
         for app, app_routes in routes.items()
@@ -89,15 +96,51 @@ def validate_probes(document):
         fail(f"{ENVIRONMENT} Probe names or app/route/environment mappings are incorrect.", 7)
 
 
-args = sys.argv[1:]
-if (
-    len(args) not in (2, 3)
-    or args[0] != "--env"
-    or args[1] not in {"staging", "prod"}
-    or (len(args) == 3 and args[2] != "--probes")
-):
-    fail("explicit --env staging or --env prod is required.")
-ENVIRONMENT = args[1]
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        fail("invalid options; explicit --env staging or --env prod is required (see --help).")
+
+
+def positive_finite(value, description):
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        fail(f"{description} must be a positive finite number.")
+    if isinstance(value, bool) or not math.isfinite(numeric) or numeric <= 0:
+        fail(f"{description} must be a positive finite number.")
+    return numeric
+
+
+def fresh(timestamp, description):
+    timestamp = positive_finite(timestamp, description)
+    if timestamp > EVALUATION_TIME:
+        fail(f"{description} is in the future.")
+    return EVALUATION_TIME - timestamp <= MAX_AGE
+
+
+def scrape_timestamp(value):
+    if not isinstance(value, str) or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", value
+    ):
+        fail("Prometheus target lastScrape must be an RFC3339 timestamp with timezone.")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, OverflowError, OSError):
+        fail("Prometheus target lastScrape is invalid.")
+
+
+parser = Parser(description=__doc__, allow_abbrev=False)
+parser.add_argument("--env", required=True, choices=("staging", "prod"))
+parser.add_argument("--probes", action="store_true", help="validate Probe configuration only")
+parser.add_argument(
+    "--evaluation-time", help="Unix seconds; default: current wall clock after input"
+)
+parser.add_argument(
+    "--max-age-seconds", default="120", help="positive freshness bound (default: 120)"
+)
+parser.add_argument("--report-json", action="store_true", help="emit bounded evidence on success")
+args = parser.parse_args()
+ENVIRONMENT = args.env
 EXPECTED = expected(ENVIRONMENT)
 EXPECTED_JOBS = {f"probe/monitoring/{name}": labels for name, labels in EXPECTED.items()}
 
@@ -105,9 +148,14 @@ try:
     document = json.load(sys.stdin)
 except (UnicodeDecodeError, json.JSONDecodeError):
     fail("response is malformed JSON.")
-if args[-1:] == ["--probes"]:
+if args.probes:
     validate_probes(document)
     raise SystemExit(0)
+
+EVALUATION_TIME = positive_finite(
+    args.evaluation_time if args.evaluation_time is not None else time.time(), "evaluation time"
+)
+MAX_AGE = positive_finite(args.max_age_seconds, "maximum age")
 
 if not isinstance(document, dict) or set(document) != {"targets", "metrics"}:
     fail("Prometheus response bundle has an invalid structure.")
@@ -117,6 +165,7 @@ active = target_data.get("activeTargets")
 if not isinstance(active, list):
     fail("Prometheus targets response has an invalid activeTargets field.")
 discovered = {}
+stale = {}
 for item in active:
     if not isinstance(item, dict) or not isinstance(item.get("labels"), dict):
         fail("Prometheus targets response contains an invalid target.")
@@ -130,6 +179,13 @@ for item in active:
         fail("Prometheus target contains invalid lifecycle-owned labels.")
     if key in discovered:
         fail("Prometheus targets contain a duplicate lifecycle-owned target.")
+    # Prometheus uses Go's zero time while a discovered target awaits its first scrape.
+    # Keep validating the rest of the bundle; unknown health cannot satisfy recovery.
+    pending = health == "unknown" and item.get("lastScrape") == "0001-01-01T00:00:00Z"
+    if not pending and not fresh(
+        scrape_timestamp(item.get("lastScrape")), "Prometheus target lastScrape"
+    ):
+        stale.setdefault(key, set()).add("lastScrape")
     discovered[key] = health
 
 metrics = document["metrics"]
@@ -157,10 +213,16 @@ for family, raw in metrics.items():
         value = sample.get("value")
         if not isinstance(value, list) or len(value) != 2 or not isinstance(value[1], str):
             fail(f"{family} response contains an invalid sample value.")
+        if isinstance(value[0], bool) or not isinstance(value[0], (int, float)):
+            fail(f"{family} response contains an invalid sample timestamp.")
+        if not fresh(value[0], f"{family} sample timestamp"):
+            stale.setdefault(key, set()).add(family)
         try:
             numeric = float(value[1])
         except ValueError:
             fail(f"{family} response contains a non-numeric sample value.")
+        if not math.isfinite(numeric):
+            fail(f"{family} response contains a non-finite sample value.")
         found.add(key)
         if family == "probe_success" and numeric != 1:
             zero.add(key)
@@ -168,24 +230,48 @@ for family, raw in metrics.items():
 
 healthy = set(discovered) == set(EXPECTED.values()) and all(v == "up" for v in discovered.values())
 complete = all(values == set(EXPECTED.values()) for values in metric_sets.values())
-if healthy and complete and not zero:
+if healthy and complete and not zero and not stale:
+    if args.report_json:
+        print(
+            json.dumps(
+                {
+                    "environment": ENVIRONMENT,
+                    "evaluation_time": EVALUATION_TIME,
+                    "max_age_seconds": MAX_AGE,
+                    "blackbox_targets": len(discovered),
+                    "blackbox_evidence": "fresh_success",
+                    "node_reachability": "not_evaluated",
+                    "api_member_health": "not_evaluated",
+                    "alertmanager_delivery": "not_evaluated",
+                    "external_resolution": "not_evaluated",
+                    "application_user_journeys": "not_evaluated",
+                },
+                sort_keys=True,
+            )
+        )
     raise SystemExit(0)
+if stale:
+    sources = ", ".join(sorted(set().union(*stale.values())))
+    print(f"ERROR: evidence is stale ({sources}).", file=sys.stderr)
 if os.environ.get("FINAL_ATTEMPT") == "1":
     print(
         f"ERROR: {ENVIRONMENT} blackbox verification did not converge before timeout.",
         file=sys.stderr,
     )
     for app, route, environment in sorted(EXPECTED.values()):
-        health = discovered.get((app, route, environment), "missing")
+        key = (app, route, environment)
+        health = discovered.get(key, "missing")
+        if health not in {"up", "down", "unknown", "missing"}:
+            health = "invalid"
         series = (
             "present"
             if all((app, route, environment) in value for value in metric_sets.values())
             else "missing"
         )
         success = (
-            "down"
-            if (app, route, environment) in zero
-            else "unknown" if series == "missing" else "up"
+            "unknown"
+            if key in stale
+            else "down" if key in zero else "unknown" if series == "missing" else "up"
         )
         print(
             json.dumps(
@@ -196,6 +282,7 @@ if os.environ.get("FINAL_ATTEMPT") == "1":
                     "health": health,
                     "series": series,
                     "probe_success": success,
+                    "stale_evidence": sorted(stale.get(key, ())),
                 },
                 sort_keys=True,
             ),
