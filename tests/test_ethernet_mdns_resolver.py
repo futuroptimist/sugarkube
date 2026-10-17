@@ -501,3 +501,144 @@ def test_service_releases_failed_tcp_clients_and_refreshes():
         stop.set()
         worker.join(3)
     assert not worker.is_alive()
+
+
+def test_discovery_packet_flood_fails_before_returning_locator(monkeypatch):
+    received = []
+    closed = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            closed.append(True)
+
+        def setsockopt(self, *args):
+            pass
+
+        def bind(self, address):
+            assert address == ("10.0.0.10", 0)
+
+        def sendto(self, data, target):
+            assert target == ("224.0.0.251", 5353)
+            self.packet = reply(DNSRecord.parse(data), [("10.0.0.21", 120)])
+
+        def settimeout(self, timeout):
+            assert timeout > 0
+
+        def recvmsg(self, *args):
+            received.append(True)
+            assert len(received) <= DNS.MAX_PACKETS + 1
+            return self.packet, ANCILLARY, 0, ("10.0.0.21", 5353)
+
+    monkeypatch.setattr(DNS.socket, "socket", lambda *args: Socket())
+    monkeypatch.setattr(DNS.time, "monotonic", lambda: 0)
+    with pytest.raises(DNS.Unavailable, match="packet limit"):
+        DNS.discover("pi1.local", "eth0", state=lambda _: ("10.0.0.10", NETWORK, 2))
+    assert len(received) == DNS.MAX_PACKETS + 1
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("peer,count", [("192.0.2.1", 1), ("127.0.0.1", 9)])
+def test_tcp_admission_rejects_foreign_peers_and_closes_over_capacity(monkeypatch, peer, count):
+    from types import SimpleNamespace
+
+    stop = threading.Event()
+    query = DNSRecord.question("pi1.local").pack()
+    queued, answered, clients = [], [], []
+
+    class Client:
+        def __init__(self):
+            self.data = struct.pack("!H", len(query)) + query
+            self.closed = False
+            self.reads = 0
+            self.sent = []
+
+        def settimeout(self, value):
+            assert value == 2
+
+        def recv(self, size):
+            self.reads += 1
+            data, self.data = self.data[:size], self.data[size:]
+            return data
+
+        def sendall(self, data):
+            self.sent.append(data)
+
+        def close(self):
+            assert not self.closed
+            self.closed = True
+
+    class Listener:
+        def __init__(self, family, kind):
+            self.kind = kind
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def bind(self, address):
+            assert address[0] == "127.0.0.1"
+
+        def getsockname(self):
+            return ("127.0.0.1", 12345)
+
+        def setsockopt(self, *args):
+            pass
+
+        def listen(self, backlog):
+            assert backlog == 8
+
+        def accept(self):
+            client = Client()
+            clients.append(client)
+            return client, (peer, 12346)
+
+    class DeferredWorkers:
+        def __init__(self, max_workers):
+            assert max_workers == 4
+
+        def __enter__(self):
+            return self
+
+        def submit(self, fn, *args):
+            queued.append((fn, args))
+
+        def __exit__(self, *args):
+            # Hold admitted work until the burst has exhausted actual semaphore slots.
+            if count == 9:
+                assert clients[-1].closed and clients[-1].reads == 0
+            for fn, args in queued:
+                fn(*args)
+
+    def readable(sockets, *args):
+        stop.set()
+        return [sockets[1]] * count, [], []
+
+    def answer(data, tcp):
+        assert data == query and tcp
+        answered.append(data)
+        return DNSRecord.parse(data).reply().pack()
+
+    monkeypatch.setattr(DNS.socket, "socket", Listener)
+    monkeypatch.setattr(DNS, "ThreadPoolExecutor", DeferredWorkers)
+    monkeypatch.setattr(DNS.select, "select", readable)
+    DNS.serve(
+        SimpleNamespace(answer=answer),
+        address="127.0.0.1",
+        port=0,
+        stop=stop,
+        refresh=lambda: None,
+        ready=lambda: None,
+    )
+    assert all(client.closed for client in clients)
+    assert len(queued) == min(count, 8)
+    if peer == "192.0.2.1":
+        assert answered == [] and clients[0].reads == 0 and clients[0].sent == []
+    else:
+        assert len(answered) == 8
+        assert all(len(client.sent) == 1 for client in clients[:8])
+        assert clients[-1].sent == []
