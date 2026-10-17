@@ -877,3 +877,64 @@ def test_address_changes_immediately_before_write_are_refused(address_recovery, 
     with pytest.raises(M.Stop, match="address changed before Node mutation"):
         voter.pre_start()
     assert not cluster.patches and not voter.path.exists()
+
+
+def test_next_confirmed_address_incident_retains_previous_completion(address_recovery):
+    cluster, voter = address_recovery
+    voter.prepare_node_address(voter.b.address(), "10.0.0.1")
+    record = voter.address_record("10.0.0.21", "10.0.0.11")
+    assert record["phase"] == "prepared" and record["old_ip"] == "10.0.0.11"
+    assert json.loads(voter.address_journal.read_text())["phase"] == "verified"
+
+
+def test_non_numeric_membership_locator_cannot_authorize_start(recovery):
+    cluster, voters = recovery
+    cluster.quorum = True
+    cluster.members["1"]["peerURLs"] = ["https://pi1.local:2380"]
+    with pytest.raises(M.Stop, match="canonical numeric"):
+        voters[0].membership()
+
+
+def test_completed_enrollment_retry_and_contention_do_not_rewrite(recovery):
+    cluster, voters = recovery
+    prepare_enrollment(cluster, voters)
+    voter = voters[0]
+    cluster.owner = "other"
+    assert voter.enroll_peer() == "waiting-for-lock"
+    assert cluster.updates == []
+    cluster.owner = None
+    assert voter.enroll_peer() == "peer-enrolled"
+    before = voter.path.read_bytes()
+    assert voter.enroll_peer() == "peer-enrolled"
+    assert voter.path.read_bytes() == before and cluster.updates == ["1"]
+
+
+def test_owned_lock_resume_and_short_verification_do_not_replay(recovery):
+    cluster, voters = recovery
+    voter = voters[0]
+    voter.pre_start()
+    cluster.quorum = cluster.api = True
+    cluster.failure = "acquire"
+    with pytest.raises(M.Stop, match="unknown acquisition"):
+        voter.watch()
+    cluster.failure = None
+    assert voter.resume() == "completion-pending"
+    assert voter.watch() == "verifying"
+    assert voter.resume() == "verifying"
+    assert voter.post_start() == "verifying"
+    assert cluster.updates == ["1"]
+    incident = voter.previous()
+    incident["phase"] = "transport-pending"
+    M.atomic_json(voter.path, incident)
+    with pytest.raises(M.Stop, match="use watcher"):
+        voter.resume()
+
+
+def test_poststart_empty_and_transport_pending_paths(recovery):
+    cluster, voters = recovery
+    voter = voters[0]
+    assert voter.post_start() == "unchanged"
+    voter.pre_start()
+    cluster.quorum = True
+    assert voter.post_start() == "completion-pending"
+    assert cluster.updates == ["1"] and cluster.owner is None

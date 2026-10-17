@@ -263,3 +263,241 @@ def test_udp_tcp_service_restart_and_outage():
         assert not worker.is_alive()
         with pytest.raises(OSError):
             query.send("127.0.0.1", port, tcp=True, timeout=0.1)
+
+
+@pytest.mark.parametrize("damage", [None, "id", "ttl"])
+def test_stub_requires_exact_single_answer(monkeypatch, damage):
+    def send(query, host, port, timeout):
+        assert (host, port, timeout) == (DNS.LISTEN, DNS.PORT, 2)
+        answer = query.reply()
+        answer.add_answer(RR(query.q.qname, QTYPE.A, rdata=A("10.0.0.21"), ttl=1))
+        if damage == "id":
+            answer.header.id ^= 1
+        elif damage == "ttl":
+            answer.rr[0].ttl = 100
+        return answer.pack()
+
+    monkeypatch.setattr(DNSRecord, "send", send)
+    if damage:
+        with pytest.raises(DNS.Unavailable):
+            DNS.query_stub("pi1.local")
+    else:
+        assert DNS.query_stub("pi1.local") == "10.0.0.21"
+
+
+def test_notify_ready_uses_private_abstract_datagram(monkeypatch):
+    target = "sugarkube-test-" + str(time.monotonic_ns())
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as receiver:
+        receiver.bind("\0" + target)
+        receiver.settimeout(1)
+        monkeypatch.setenv("NOTIFY_SOCKET", "@" + target)
+        DNS.notify_ready()
+        assert receiver.recv(100) == b"READY=1"
+
+
+@pytest.mark.parametrize("damage", [None, "interface", "empty", "loopback"])
+def test_interface_snapshot_is_bounded_and_primary_only(monkeypatch, damage):
+    import json
+    from types import SimpleNamespace
+
+    row = {"ifindex": 3, "addr_info": [{"scope": "global", "local": "10.0.0.10", "prefixlen": 24}]}
+    if damage == "empty":
+        row["addr_info"] = []
+    elif damage == "loopback":
+        row["addr_info"][0]["local"] = "127.0.0.1"
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["timeout"] == 3 and kwargs["check"]
+        return SimpleNamespace(stdout=json.dumps([row]))
+
+    monkeypatch.setattr(DNS.subprocess, "run", run)
+    if damage:
+        with pytest.raises(DNS.Unavailable):
+            DNS.interface_state("wlan0" if damage == "interface" else "eth0")
+    else:
+        assert DNS.interface_state("eth0") == ("10.0.0.10", NETWORK, 3)
+    assert len(calls) == (0 if damage == "interface" else 1)
+
+
+@pytest.mark.parametrize(
+    "tcp,damage", [(False, None), (True, None), (False, "id"), (True, "eof"), (False, "truncate")]
+)
+def test_forward_checks_response_and_tcp_fallback(monkeypatch, tcp, damage):
+    query = DNSRecord.question("example.test")
+    answer = query.reply()
+    answer.add_answer(RR(query.q.qname, QTYPE.A, rdata=A("192.0.2.1"), ttl=20))
+    calls = []
+
+    class Socket:
+        def __init__(self, family, kind):
+            self.tcp = kind == socket.SOCK_STREAM
+            self.remaining = b""
+            calls.append((family, kind))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def settimeout(self, value):
+            assert value == 0.6
+
+        def connect(self, target):
+            assert target == ("::1", 53)
+
+        def sendall(self, data):
+            response = DNSRecord.parse(answer.pack())
+            if damage == "id":
+                response.header.id ^= 1
+            if damage == "truncate" and not self.tcp:
+                response.header.tc = 1
+            wire = response.pack()
+            self.remaining = (struct.pack("!H", len(wire)) if self.tcp else b"") + wire
+
+        def recv(self, count):
+            if damage == "eof":
+                return b""
+            result, self.remaining = self.remaining[:count], self.remaining[count:]
+            return result
+
+    monkeypatch.setattr(DNS.socket, "socket", Socket)
+    if damage in ("id", "eof"):
+        with pytest.raises(DNS.Unavailable, match="upstream unavailable"):
+            DNS.forward(query.pack(), ["::1"], tcp)
+    else:
+        assert DNS.forward(query.pack(), ["::1"], tcp) == answer.pack()
+    assert len(calls) == (2 if damage == "truncate" else 1)
+
+
+def test_resolver_rejects_bad_queries_and_truncates_oversized_udp(tmp_path):
+    from dnslib import TXT
+
+    with pytest.raises(DNS.Unavailable, match="three exact"):
+        DNS.Resolver({**ENROLLMENT, "members": [{"hostname": "wrong"}]})
+    upstream = tmp_path / "upstream"
+    upstream.write_text("nameserver 192.0.2.1\n")
+    query = DNSRecord.question("example.test", "TXT")
+    reply = query.reply()
+    for _ in range(5):
+        reply.add_answer(RR(query.q.qname, QTYPE.TXT, rdata=TXT("x" * 200), ttl=10))
+    resolver = DNS.Resolver(ENROLLMENT, upstream=upstream, send=lambda *a, **kw: reply.pack())
+    result = DNSRecord.parse(resolver.answer(query.pack()))
+    assert result.header.tc and not result.rr
+    assert resolver.answer(query.pack(), tcp=True) == reply.pack()
+    query.header.qr = 1
+    assert DNSRecord.parse(resolver.answer(query.pack())).header.rcode == RCODE.FORMERR
+    assert resolver.answer(b"broken") == b""
+    for text in ("x" * 16385, "nameserver 192.0.2.1 extra\n"):
+        with pytest.raises(DNS.Unavailable):
+            DNS.resolver_text(text)
+    mdns = DNSRecord.question("pi1.local")
+    assert DNS.candidate_answers(mdns, b"broken", ANCILLARY, 0, ("10.0.0.21", 5353), NETWORK) == []
+    answer = mdns.reply()
+    answer.add_answer(RR("other.local", QTYPE.A, rdata=A("10.0.0.21"), ttl=1))
+    assert (
+        DNS.candidate_answers(mdns, answer.pack(), ANCILLARY, 0, ("10.0.0.21", 5353), NETWORK) == []
+    )
+
+
+def test_atomic_publish_failure_preserves_previous_generation(tmp_path, monkeypatch):
+    path = tmp_path / "process-resolv.conf"
+    path.write_text("previous")
+
+    def fail(*args):
+        raise OSError("publication interrupted")
+
+    monkeypatch.setattr(DNS.os, "replace", fail)
+    with pytest.raises(OSError):
+        DNS.atomic(path, "next")
+    assert path.read_text() == "previous"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("damage", [None, "schema", "source", "state"])
+def test_service_entry_validates_enrollment_and_runtime_before_serving(
+    tmp_path, monkeypatch, damage
+):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    path = tmp_path / "enrollment.json"
+    e = {**ENROLLMENT, "pod_resolv_source": str(DNS.POD_SOURCES[0])}
+    if damage == "schema":
+        e["schema_version"] = 1
+    if damage == "source":
+        e["pod_resolv_source"] = "/unsupported"
+    path.write_text(json.dumps(e))
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--enrollment", str(path)])
+    monkeypatch.setattr(
+        DNS,
+        "STATE",
+        SimpleNamespace(
+            is_symlink=lambda: False,
+            stat=lambda: SimpleNamespace(st_uid=0, st_mode=0o777 if damage == "state" else 0o755),
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(DNS, "publish_config", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(DNS, "serve", lambda resolver, refresh: refresh())
+    if damage:
+        with pytest.raises(DNS.Unavailable):
+            DNS.main()
+        assert calls == []
+    else:
+        DNS.main()
+        assert calls == [{"pod_source": DNS.POD_SOURCES[0]}]
+
+
+def test_resolver_cli_rejects_old_schema(tmp_path, monkeypatch):
+    import json
+    import runpy
+    import sys
+
+    path = tmp_path / "request"
+    path.write_text(json.dumps({"schema_version": 1}))
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--enrollment", str(path)])
+    with pytest.raises(ValueError, match="version 2"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+
+
+def test_service_releases_failed_tcp_clients_and_refreshes():
+    stop = threading.Event()
+    ready = threading.Event()
+    refreshes = []
+    with socket.socket() as reserve:
+        reserve.bind(("127.0.0.1", 0))
+        port = reserve.getsockname()[1]
+    worker = threading.Thread(
+        target=DNS.serve,
+        args=(DNS.Resolver(ENROLLMENT, lookup=lambda *args: "10.0.0.21"),),
+        kwargs={
+            "address": "127.0.0.1",
+            "port": port,
+            "stop": stop,
+            "ready": ready.set,
+            "refresh": lambda: refreshes.append(time.monotonic()),
+        },
+    )
+    worker.start()
+    try:
+        assert ready.wait(2)
+        for prefix in (b"\0\0", b"\0"):
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as client:
+                client.sendall(prefix)
+                client.shutdown(socket.SHUT_WR)
+                assert client.recv(1) == b""
+        deadline = time.monotonic() + 3
+        while len(refreshes) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(refreshes) >= 2
+        query = DNSRecord.question("pi1.local")
+        result = DNSRecord.parse(query.send("127.0.0.1", port, tcp=True, timeout=2))
+        assert str(result.rr[0].rdata) == "10.0.0.21"
+    finally:
+        stop.set()
+        worker.join(3)
+    assert not worker.is_alive()

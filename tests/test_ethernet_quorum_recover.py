@@ -348,7 +348,18 @@ def test_backend_session_failure_never_reconnects(enrollment):
     assert len(calls) == 2 and closed == [True]
 
 
-def test_backend_inventory_pins_all_inputs_and_rejects_overrides(enrollment, tmp_path, monkeypatch):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_backend_inventory_pins_all_inputs_and_rejects_overrides(
+    enrollment, tmp_path, monkeypatch, schema_version
+):
+    from test_ethernet_mdns_resolver import DNS
+
+    enrollment["schema_version"] = schema_version
+    enrollment["pod_resolv_source"] = "/run/systemd/resolve/resolv.conf"
+    enrollment["local_database"] = {}
+    monkeypatch.setattr(MODULE, "sibling", lambda name: DNS)
+    monkeypatch.setattr(MODULE.Backend, "local_database", lambda self: {})
+    monkeypatch.setattr(MODULE.Backend, "resolver_ready", lambda self: None)
     real_path = Path
 
     def redirected(value):
@@ -531,9 +542,17 @@ def test_grpc_routes_are_limited_to_approved_operations(enrollment):
         for after in (False, True)
     ],
 )
+@pytest.mark.parametrize("schema_version", [1, 2])
 def test_explicit_enrollment_installs_inactive_units_only(
-    enrollment, tmp_path, monkeypatch, failure, after_write
+    enrollment, tmp_path, monkeypatch, failure, after_write, schema_version
 ):
+    from types import SimpleNamespace
+
+    enrollment["schema_version"] = schema_version
+    enrollment["completion_https_urls"] = ["https://app.example/health"]
+    dns_config = tmp_path / "dns-config"
+    dns_config.write_text(json.dumps({"pod_resolv_source": "/run/systemd/resolve/resolv.conf"}))
+    monkeypatch.setattr(MODULE, "sibling", lambda name: SimpleNamespace(CONFIG=dns_config))
     backend = FakeBackend(enrollment)
     backend.ip = enrollment["local_ipv4"]
     inventory = {
@@ -543,6 +562,8 @@ def test_explicit_enrollment_installs_inactive_units_only(
         "yaml_fragments": [],
     }
     backend.inventory = lambda: copy.deepcopy(inventory)
+    backend.local_database = lambda: {"member_id": "1", "cluster_id": "100"}
+    backend.peer_tls = lambda host: None
 
     def node(host, name):
         i = int(name[2])
@@ -555,7 +576,10 @@ def test_explicit_enrollment_installs_inactive_units_only(
                     "k3s.io/internal-ip": ip,
                 },
             },
-            "status": {"addresses": [{"type": "InternalIP", "address": ip}]},
+            "status": {
+                "addresses": [{"type": "InternalIP", "address": ip}],
+                "conditions": [{"type": "Ready", "status": "True"}],
+            },
         }
 
     backend.node = node
@@ -567,6 +591,7 @@ def test_explicit_enrollment_installs_inactive_units_only(
             "RUNTIME",
             "TRANSPORT",
             "DESCRIPTOR",
+            *(["WAL_RUNTIME"] if schema_version == 2 else []),
             "HOOK",
             "WATCH_SERVICE",
             "WATCH_TIMER",
@@ -1389,3 +1414,427 @@ def test_node_api_single_request_pins_tls_and_never_retries(
         assert json.loads(body) == patch
         assert headers["Content-Type"] == "application/json-patch+json"
     assert not any(p.exists() for p in paths)
+
+
+@pytest.fixture
+def virtual_root(tmp_path, monkeypatch):
+    def mapped(value):
+        path = Path(value)
+        if path.is_absolute() and not path.is_relative_to(tmp_path):
+            return tmp_path / str(path).lstrip("/")
+        return path
+
+    def write(value, content):
+        path = mapped(value)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        return path
+
+    monkeypatch.setattr(MODULE, "Path", mapped)
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+    return mapped, write
+
+
+def test_local_database_guard_uses_original_identity_and_never_writes(
+    enrollment, virtual_root, monkeypatch
+):
+    from types import SimpleNamespace
+
+    path, write = virtual_root
+    member = "/var/lib/rancher/k3s/server/db/etcd/member"
+    write(member + "/snap/db", "database")
+    write(member + "/wal/0000.wal", "immutable header")
+    write("/var/lib/rancher/k3s/server/db/etcd/name", "member0")
+    backend = MODULE.Backend(enrollment)
+    identity = {"member_id": "1", "cluster_id": "100"}
+    monkeypatch.setattr(
+        MODULE, "sibling", lambda name: SimpleNamespace(identity=lambda directory: identity)
+    )
+    result = backend.local_database()
+    assert result["member_id"] == "1" and result["inode"] == path(member).stat().st_ino
+    assert path(member + "/snap/db").read_text() == "database"
+    identity["member_id"] = "2"
+    with pytest.raises(MODULE.Stop, match="WAL identity"):
+        backend.local_database()
+    identity["member_id"] = "1"
+    write("/var/lib/rancher/k3s/server/db/reset-flag", "")
+    with pytest.raises(MODULE.Stop, match="reset state"):
+        backend.local_database()
+
+
+@pytest.fixture
+def resolver_backend(enrollment, virtual_root, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from test_ethernet_mdns_resolver import DNS
+
+    path, write = virtual_root
+    state = tmp_path / "dns-state"
+    state.mkdir()
+    dns = SimpleNamespace(
+        STATE=state,
+        RUNTIME="/runtime/dns.py",
+        CONFIG="/config/dns.json",
+        resolver_text=DNS.resolver_text,
+        pod_resolver_text=DNS.pod_resolver_text,
+    )
+    installed = write("/runtime/dns.py", "reviewed runtime")
+    dns.service_files = lambda e: {installed: b"reviewed runtime"}
+    monkeypatch.setattr(MODULE, "sibling", lambda name: dns)
+    enrollment.update(schema_version=2, pod_resolv_source="/run/systemd/resolve/resolv.conf")
+    text = "nameserver 10.0.0.53\nsearch lab.test\n"
+    expected = DNS.resolver_text(text)[1]
+    for filename, value in (
+        ("upstream-resolv.conf", text),
+        ("process-resolv.conf", expected),
+        ("kubelet-resolv.conf", text),
+    ):
+        (state / filename).write_text(value)
+    write("/proc/42/root/run/systemd/resolve/resolv.conf", text)
+    write("/proc/43/root/etc/resolv.conf", expected)
+    properties = {
+        "dns": {
+            "ActiveState": "active",
+            "NeedDaemonReload": "no",
+            "DropInPaths": "",
+            "MainPID": "42",
+            "ExecStart": (
+                "{ argv[]=/usr/bin/python3 -I /runtime/dns.py "
+                "--enrollment /config/dns.json ; ignore_errors=no ; }"
+            ),
+        },
+        "k3s": {
+            "NeedDaemonReload": "no",
+            "DropInPaths": MODULE.DNS_HOOK,
+            "MainPID": "43",
+            "BindReadOnlyPaths": f"{state}/process-resolv.conf:/etc/resolv.conf",
+        },
+    }
+    backend = MODULE.Backend(enrollment)
+    backend.command = lambda argv: "\n".join(
+        f"{k}={v}"
+        for k, v in properties[
+            "dns" if argv[2] == "sugarkube-ethernet-dns.service" else "k3s"
+        ].items()
+    )
+    return backend, properties, state
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "inactive", "dirty", "binding", "process", "pod", "running"]
+)
+def test_scoped_resolver_guard_refuses_each_drift_without_restart(
+    resolver_backend, virtual_root, damage
+):
+    backend, props, state = resolver_backend
+    path, write = virtual_root
+    commands = []
+    command = backend.command
+
+    def read_only(argv):
+        commands.append(argv)
+        assert argv[:2] == ["/usr/bin/systemctl", "show"]
+        assert argv[2] in {"sugarkube-ethernet-dns.service", "k3s.service"}
+        assert len(argv) == 4 and argv[3].startswith("--property=")
+        return command(argv)
+
+    backend.command = read_only
+    if damage == "inactive":
+        props["dns"]["ActiveState"] = "inactive"
+    elif damage == "dirty":
+        props["k3s"]["NeedDaemonReload"] = "yes"
+    elif damage == "binding":
+        props["k3s"]["BindReadOnlyPaths"] = ""
+    elif damage == "process":
+        (state / "process-resolv.conf").write_text("nameserver 8.8.8.8\n")
+    elif damage == "pod":
+        (state / "kubelet-resolv.conf").write_text("nameserver 127.0.0.1\n")
+    elif damage == "running":
+        write("/proc/43/root/etc/resolv.conf", "nameserver 127.0.0.55\nsearch previous.test\n")
+    if damage:
+        with pytest.raises(MODULE.Stop):
+            backend.resolver_ready()
+    else:
+        backend.resolver_ready()
+    assert commands
+
+
+def test_v2_config_proves_database_and_resolver(resolver_backend, monkeypatch):
+    backend, _, _ = resolver_backend
+    calls = []
+    backend.e["local_database"] = {"member_id": "1"}
+    monkeypatch.setattr(backend, "recovery_hook_loaded", lambda: None)
+    monkeypatch.setattr(backend, "inventory", lambda: {})
+    monkeypatch.setattr(backend, "local_database", lambda: calls.append("db") or {"member_id": "1"})
+    backend.config()
+    assert calls == ["db"]
+    backend.e["local_database"] = {"member_id": "2"}
+    with pytest.raises(MODULE.Stop, match="database identity"):
+        backend.config()
+
+
+def test_backend_stability_transport_state_and_pinned_stub(enrollment, monkeypatch):
+    from types import SimpleNamespace
+
+    backend = MODULE.Backend(enrollment)
+    backend.command = lambda _: "ActiveState=activating\nMainPID=42"
+    assert backend.transport_running()
+    backend.command = lambda _: "ActiveState=inactive\nMainPID=0"
+    assert not backend.transport_running()
+    sleeps = []
+    backend.address = lambda: "10.0.0.20"
+    monkeypatch.setattr(MODULE.time, "sleep", sleeps.append)
+    backend.stable_address("10.0.0.20")
+    assert sleeps == [15, 15]
+    with pytest.raises(MODULE.Stop, match="stable"):
+        backend.stable_address("10.0.0.21")
+    enrollment["schema_version"] = 2
+    answer = ["10.0.0.11"]
+    monkeypatch.setattr(
+        MODULE, "sibling", lambda name: SimpleNamespace(query_stub=lambda host: answer[0])
+    )
+    assert backend.resolve("pi1.local") == "10.0.0.11"
+    answer[0] = "10.0.0.12"
+    with pytest.raises(MODULE.Stop, match="changed during recovery"):
+        backend.resolve("pi1.local")
+    with pytest.raises(MODULE.Stop, match="unenrolled"):
+        backend.resolve("foreign.local")
+
+
+@pytest.mark.parametrize("damage", [None, "peer-name", "peer-response"])
+def test_peer_certificate_probe_requires_specific_name_and_source_acceptance(
+    enrollment, monkeypatch, damage
+):
+    from types import SimpleNamespace
+
+    backend = MODULE.Backend(enrollment)
+    calls = []
+    tls = SimpleNamespace(
+        getpeercert=lambda: {
+            "subjectAltName": [("DNS", "pi0.local" if damage == "peer-name" else "pi1.local")]
+        }
+    )
+    context = SimpleNamespace(
+        load_cert_chain=lambda *a: None, wrap_socket=lambda raw, server_hostname: tls
+    )
+    monkeypatch.setattr(MODULE.ssl, "create_default_context", lambda **kw: context)
+    raw = SimpleNamespace(close=lambda: calls.append("raw-close"))
+    backend.connect_peer = lambda address, port: raw
+    backend.resolve = lambda host: "10.0.0.11"
+    connection = SimpleNamespace(
+        request=lambda *args: calls.append(args),
+        getresponse=lambda: SimpleNamespace(
+            status=403 if damage == "peer-response" else 200, read=lambda size: b"members"
+        ),
+        close=lambda: calls.append("close"),
+    )
+    monkeypatch.setattr(MODULE.http.client, "HTTPConnection", lambda *a, **kw: connection)
+    if damage:
+        with pytest.raises(MODULE.Stop):
+            backend.peer_tls("pi1.local")
+    else:
+        backend.peer_tls("pi1.local")
+        assert ("GET", "/members") in calls
+    assert calls[-2:] == ["raw-close", "close"]
+
+
+@pytest.mark.parametrize("damage", [None, "pod", "generation", "daemonset", "replicas", "https"])
+def test_workload_completion_checks_real_shapes(enrollment, monkeypatch, damage):
+    from types import SimpleNamespace
+
+    backend = MODULE.Backend(enrollment)
+    enrollment.update(kubeconfig="/synthetic", completion_https_urls=["https://app.example/health"])
+    backend.resolve = lambda host: "10.0.0.11"
+    items = [
+        {
+            "kind": "Pod",
+            "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]},
+        },
+        {"kind": "Pod", "status": {"phase": "Succeeded"}},
+        {
+            "kind": "DaemonSet",
+            "metadata": {"generation": 2},
+            "status": {"observedGeneration": 2, "desiredNumberScheduled": 3, "numberReady": 3},
+        },
+        {
+            "kind": "Deployment",
+            "metadata": {"generation": 2},
+            "spec": {"replicas": 2},
+            "status": {"observedGeneration": 2, "readyReplicas": 2},
+        },
+    ]
+    if damage == "pod":
+        items[0]["status"]["phase"] = "Pending"
+    if damage == "generation":
+        items[2]["status"]["observedGeneration"] = 1
+    if damage == "daemonset":
+        items[2]["status"]["numberReady"] = 2
+    if damage == "replicas":
+        items[3]["status"]["readyReplicas"] = 1
+    backend.command = lambda argv: json.dumps({"items": items})
+    calls = []
+    connection = SimpleNamespace(
+        request=lambda *args: calls.append(args),
+        getresponse=lambda: SimpleNamespace(
+            status=503 if damage == "https" else 200, read=lambda n: b"ok"
+        ),
+        close=lambda: calls.append("closed"),
+    )
+    monkeypatch.setattr(MODULE.http.client, "HTTPSConnection", lambda *a, **kw: connection)
+    if damage:
+        with pytest.raises(MODULE.Stop):
+            backend.workloads("pi1.local")
+    else:
+        backend.workloads("pi1.local")
+        assert calls == [("GET", "/health"), "closed"]
+    if damage == "https":
+        assert calls[-1] == "closed"
+
+
+def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
+    enrollment, tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    enrollment.update(schema_version=2, completion_https_urls=["https://app.example/health"])
+    backend = FakeBackend(enrollment)
+    backend.ip = enrollment["local_ipv4"]
+    backend.inventory = lambda: {"files": enrollment["files"]}
+    backend.local_database = lambda: {"member_id": "1", "cluster_id": "100"}
+    installed = tmp_path / "installed"
+    files = {installed / "runtime": b"reviewed", installed / "hook": b"hook"}
+    dns = SimpleNamespace(
+        HOOK=installed / "hook",
+        select_pod_source=lambda: Path("/run/systemd/resolve/resolv.conf"),
+        service_files=lambda e: dict(files),
+    )
+    monkeypatch.setattr(MODULE, "Backend", lambda e: backend)
+    monkeypatch.setattr(MODULE, "sibling", lambda name: dns)
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps(enrollment))
+    writes = []
+    atomic = MODULE.atomic_write
+
+    def record(path, content):
+        writes.append(path)
+        atomic(path, content)
+
+    monkeypatch.setattr(MODULE, "atomic_write", record)
+    assert "prepared inactive" in MODULE.prepare_resolver(request)
+    assert writes[-1] == dns.HOOK
+    assert all(p.read_bytes() == v for p, v in files.items())
+    assert not updates(backend)
+    with pytest.raises(MODULE.Stop, match="existing resolver"):
+        MODULE.prepare_resolver(request)
+    assert writes == list(files)
+
+
+def test_sibling_import_and_etcd_health_request_are_bounded(enrollment, monkeypatch):
+    from types import SimpleNamespace
+
+    assert callable(MODULE.sibling("ethernet_wal_identity").identity)
+    backend = MODULE.Backend(enrollment)
+    calls = []
+    backend.request = lambda host, route, body: calls.append((host, route, body)) or {}
+    assert backend.etcd("pi1.local", "endpoint", "health") == [{"health": True}]
+    assert calls[0][2]["serializable"] is False
+    assert calls[0][2]["count_only"] is True
+    enrollment["etcd_tls"] = {"ca": "/ca", "cert": "/cert", "key": "/key"}
+    monkeypatch.setattr(MODULE, "sibling", lambda name: SimpleNamespace(Session=lambda *args: args))
+    args = backend.open_session("pi1.local", "10.0.0.11", enrollment["members"][1])
+    assert args[:4] == ("pi1.local", "100", "2", enrollment["etcd_tls"])
+    backend.connect_peer = lambda address: address
+    assert args[4]() == "10.0.0.11"
+
+
+def test_missing_dependency_is_explicit_not_imported_from_environment(monkeypatch):
+    from types import SimpleNamespace
+
+    def fail(module):
+        raise ImportError("dependency unavailable")
+
+    monkeypatch.setattr(
+        MODULE.importlib.util,
+        "spec_from_file_location",
+        lambda *a: SimpleNamespace(loader=SimpleNamespace(exec_module=fail)),
+    )
+    monkeypatch.setattr(MODULE.importlib.util, "module_from_spec", lambda spec: object())
+    with pytest.raises(MODULE.Stop, match="dependency unavailable"):
+        MODULE.sibling("ethernet_etcd_grpc")
+
+
+@pytest.mark.parametrize("state", ["old-incident", "no-match", "unavailable"])
+def test_startup_diagnostics_do_not_mask_original_failure(
+    tmp_path, enrollment, monkeypatch, capsys, state
+):
+    backend = MODULE.Backend(enrollment)
+    incident = {"token": "synthetic-incident"}
+    if state != "old-incident":
+        incident["created_at"] = 1
+    MODULE.atomic_json(tmp_path / "incident.json", incident)
+
+    def command(argv):
+        if state == "unavailable":
+            raise MODULE.Stop("journal unavailable")
+        return json.dumps({"MESSAGE": "ordinary startup"})
+
+    monkeypatch.setattr(backend, "command", command)
+    MODULE.report_startup_failure(backend, tmp_path)
+    assert capsys.readouterr().out == ""
+    assert not (tmp_path / "startup-failure.json").exists()
+
+
+def test_backend_close_is_idempotent_and_leaves_no_reusable_session(enrollment):
+    from types import SimpleNamespace
+
+    backend = MODULE.Backend(enrollment)
+    calls = []
+    backend.connections = {
+        "pi1.local": SimpleNamespace(close=lambda: calls.append("closed")),
+        "pi2.local": None,
+    }
+    backend.close()
+    backend.close()
+    assert calls == ["closed"] and set(backend.connections.values()) == {None}
+
+
+@pytest.mark.parametrize(
+    "phase,flag,action",
+    [("arm", "armed", "armed"), ("enroll-peer", "dual_enrolled", "peer-enrolled")],
+)
+def test_v2_cli_records_only_confirmed_enrollment_transition(
+    enrollment, tmp_path, monkeypatch, phase, flag, action
+):
+    import sys
+    from types import SimpleNamespace
+
+    enrollment.update(schema_version=2, armed=False, dual_enrolled=False)
+    path = tmp_path / "enrollment.json"
+    path.write_text(json.dumps(enrollment))
+    state = tmp_path / "state"
+    monkeypatch.setattr(MODULE.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(MODULE, "trusted_file", lambda p: None)
+    monkeypatch.setattr(MODULE, "private_state", lambda p: p.mkdir())
+    monkeypatch.setattr(MODULE, "Backend", lambda e: SimpleNamespace(close=lambda: None))
+    methods = {
+        name: (lambda **kwargs: action)
+        for name in (
+            "pre_start",
+            "post_start",
+            "watch",
+            "resume",
+            "enroll_peer",
+            "arm",
+            "resume_transport",
+            "resume_node_address",
+        )
+    }
+    monkeypatch.setattr(MODULE, "DualRecovery", lambda *args: SimpleNamespace(**methods))
+    monkeypatch.setattr(
+        sys, "argv", [str(SCRIPT), phase, "--enrollment", str(path), "--state-dir", str(state)]
+    )
+    assert MODULE.main() == 0
+    saved = json.loads(path.read_text())
+    assert saved[flag] is True
+    assert saved["dual_enrolled" if flag == "armed" else "armed"] is False

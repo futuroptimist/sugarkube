@@ -81,3 +81,48 @@ def test_missing_or_symlinked_wal_is_refused(tmp_path):
 def test_crc32c_known_vector_and_seed_composition():
     assert W.crc32c(b"123456789") == 0xE3069283
     assert W.crc32c(b"56789", W.crc32c(b"1234")) == 0xE3069283
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        b"\x08\x80",
+        b"\x08" + b"\xff" * 9 + b"\x02",
+        b"\x08" + b"\x80" * 10,
+        b"\x00\x00",
+        b"\x08\x01\x08\x02",
+        b"\x0a\x05a",
+        b"\x0d",
+    ],
+)
+def test_identity_parser_rejects_ambiguous_or_unbounded_protobuf(wire):
+    with pytest.raises(ValueError):
+        W.fields(wire)
+
+
+def test_invalid_frames_and_identity_types_are_read_only(tmp_path, monkeypatch):
+    import io
+    import struct
+    from types import SimpleNamespace
+
+    record = b"\x08\x04"  # Missing checksum field.
+    framed = struct.pack("<Q", len(record) | ((0x80 | 6) << 56)) + record + b"\0" * 6
+    with pytest.raises(ValueError, match="invalid WAL identity record"):
+        W.frame(io.BytesIO(framed))
+    path = tmp_path / "0000000000000000-0000000000000000.wal"
+    path.write_bytes(HEADERS[0])
+    monkeypatch.setattr(W.os, "fstat", lambda fd: SimpleNamespace(st_mode=0o040755))
+    with pytest.raises(ValueError, match="regular file"):
+        W.segment_identity(path)
+    monkeypatch.undo()
+    for payload in (b"\x08\x00\x10\x01", b"\x08\x01", b"\x0a\x01x\x10\x01"):
+        records = iter([{1: 4, 2: 0}, {1: 1, 2: W.crc32c(payload), 3: payload}])
+        monkeypatch.setattr(W, "frame", lambda _: next(records))
+        with pytest.raises(ValueError, match="member/cluster identity"):
+            W.segment_identity(path)
+    assert path.read_bytes() == HEADERS[0]
+    path.rename(tmp_path / "invalid.wal")
+    with pytest.raises(ValueError, match="segment name"):
+        W.identity(tmp_path)
+    with pytest.raises(ValueError, match="initialized WAL"):
+        W.identity(tmp_path / "missing")

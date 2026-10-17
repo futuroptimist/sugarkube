@@ -275,3 +275,47 @@ def test_missing_client_authentication_cannot_dispatch(tls, endpoint, tmp_path):
     with pytest.raises(TRANSPORT.TransportError, match="connection failed"):
         session({**tls, "key": str(key), "cert": str(cert)}, endpoint)
     assert endpoint["calls"] == [] and endpoint["connects"] == 1
+
+
+def test_closed_relay_rejects_new_socket_and_constructor_cleans_up(monkeypatch, tmp_path):
+    import threading
+    from types import SimpleNamespace
+
+    closed = []
+    relay = TRANSPORT.OneConnection.__new__(TRANSPORT.OneConnection)
+    relay.guard = threading.Lock()
+    relay.closed = threading.Event()
+    relay.closed.set()
+    with pytest.raises(TRANSPORT.TransportError, match="closed"):
+        relay.register(SimpleNamespace(close=lambda: closed.append(True)))
+    assert closed == [True]
+
+    def fail_bind(path):
+        raise OSError("bind failed")
+
+    sock = SimpleNamespace(bind=fail_bind, close=lambda: closed.append(True))
+    monkeypatch.setattr(TRANSPORT.socket, "socket", lambda *args: sock)
+    monkeypatch.setattr(TRANSPORT.tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(OSError, match="bind failed"):
+        TRANSPORT.OneConnection(lambda: pytest.fail("must not connect"))
+    assert closed == [True, True] and list(tmp_path.iterdir()) == []
+
+
+def test_schema_tamper_and_legacy_protobuf_factory_are_checked(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(TRANSPORT.Path, "read_bytes", lambda _: b"tampered")
+    with pytest.raises(TRANSPORT.TransportError, match="schema changed"):
+        TRANSPORT.Session("pi1.local", CID, MID, {}, lambda: pytest.fail("must not connect"))
+    calls = []
+    monkeypatch.setattr(
+        TRANSPORT,
+        "message_factory",
+        SimpleNamespace(
+            MessageFactory=lambda pool: SimpleNamespace(
+                GetPrototype=lambda descriptor: calls.append((pool, descriptor)) or "legacy-message"
+            )
+        ),
+    )
+    assert TRANSPORT.message_class("descriptor", "pool") == "legacy-message"
+    assert calls == [("pool", "descriptor")]
