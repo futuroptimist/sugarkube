@@ -757,16 +757,16 @@ def test_watcher_reconciles_then_prestart_consumes_once(address_recovery, monkey
 
 def test_resume_preserves_unknown_membership_latch(address_recovery):
     cluster, voter = address_recovery
-    incident = dict(
-        token="owned",
-        phase="membership-intent",
-        transport="start-authorized",
-        member_id="1",
-        cluster_id="100",
-        ip=voter.b.address(),
-        old_peer_urls=M.dual_urls(voter.local, "10.0.0.1"),
-        mutation_dispatched=True,
-    )
+    incident = {
+        "token": M.uuid.uuid4().hex,
+        "phase": "membership-intent",
+        "transport": "start-authorized",
+        "member_id": "1",
+        "cluster_id": "100",
+        "ip": voter.b.address(),
+        "old_peer_urls": M.dual_urls(voter.local, "10.0.0.1"),
+        "mutation_dispatched": True,
+    }
     M.atomic_json(voter.path, incident)
     # Model stopped K3s after a previous authorized start, without erasing its latch.
     original_api = voter.b.address_node
