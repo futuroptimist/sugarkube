@@ -3,8 +3,9 @@
 K-339 remains open until owner-run staging and production qualification. This implementation
 provides automatic local address refresh and an **optional, disabled-by-default recovery
 controller**. Version 1 enrollment handles one changed server with two healthy survivors.
-Version 2 adds experimental all-member transport recovery through pre-enrolled hostname
-peer URLs. It is not qualified for rollout and cannot repair genuine loss of quorum data. Static IP assignments, DHCP reservations and Wi-Fi
+Version 2 retains experimental dual peer URLs, but changed-address startup now requires
+two healthy surviving original voters and their APIs. All-member recovery is not supported
+by the current startup gate. It is not qualified for rollout and cannot repair genuine loss of quorum data. Static IP assignments, DHCP reservations and Wi-Fi
 failover are not solutions used by these tools.
 
 No live staging or production access was used to develop this change. Earlier disposable
@@ -217,7 +218,7 @@ atomically fence an unrelated membership RPC; automatic lease takeover is intent
 
 ### Version 1 stale Node status and explicit resumption
 
-The controller does not patch Node status automatically. A current `k3s.io/internal-ip`
+The version 1 controller does not patch Node status automatically. A current `k3s.io/internal-ip`
 annotation with stale `status.addresses` can still cause the observed network-controller
 restart failure. That is a remaining limit on unattended recovery.
 
@@ -301,23 +302,29 @@ clusters based on the present cloud evidence.
 
 ### Transport, membership and completion
 
-On a cold address change, each server validates its trusted configuration, enrolled database
-identity, stable Ethernet address and own mDNS locator before authorizing one existing-database
-start. It does not wait for another healthy voter or the API. A running server debounces the
-change, refreshes owned network YAML and records one restart authorization to rebind transport.
-No database is initialized or replaced by the controller. The WAL checker reads only bounded,
-CRC-validated immutable identity headers; K3s still validates and opens its own database.
+On a cold address change, version 2 validates trusted configuration, enrolled database
+identity, stable Ethernet address and its own mDNS locator. It then requires two healthy,
+authenticated original surviving voters with current peer URLs and healthy original Nodes.
+Before authorizing one existing-database start, it reconciles the recovering Node's address
+through those surviving APIs as described below. No local etcd/API endpoint is needed for
+this gate. Without surviving control planes it refuses startup; the earlier transport-only
+architecture does not solve normal-agent startup after an all-member address change.
+
+A running server debounces the change and refreshes owned network YAML before applying the
+same gate. The pre-start hook checks the address again when consuming a restart authorization.
+No database is initialized or replaced. The WAL checker reads only bounded, CRC-validated
+immutable identity headers; K3s still validates and opens its own database.
 
 After hostname transport restores consensus, the controller authenticates all three original
 members and performs linearizable checks before acquiring the membership lock. It records
 durable mutation intent, changes only its own numeric URL while retaining its hostname,
-verifies readback and releases the lock. API readiness is deliberately checked afterwards,
-so one server waiting for Node status cannot prevent the others repairing their numeric URLs.
+verifies readback and releases the lock. Full Node/workload completion remains after lock
+release, independently of the new surviving-API address gate before startup.
 
 Local completion still requires all three healthy voters, original Node UIDs and member
 bindings, current annotation/status addresses, Node Ready, ready workload controllers and
 pods, application HTTPS success, and a stable K3s process over 30 seconds. Stale Node status
-or failed workloads leave completion pending; they are never patched or reported recovered.
+or failed workloads leave completion pending; completion never fabricates Ready or workload health.
 
 A definitive false acquisition comparison permits automatic waiting. If another original
 member completes between the membership snapshot and successful acquisition, the controller
@@ -334,11 +341,71 @@ unknown membership intent. `resume-peer-enrollment` performs explicit enrollment
 These commands cannot take over another owner's lock, remove members or bypass identity
 checks. A second address change or contradictory state stops progress for operator review.
 
+### Bounded surviving-control-plane address reconciliation
+
+The isolated Ubuntu VMware qualification at `a7dc5c68` changed q3 from `.130` to `.131`.
+Peer transport connected and the corruption check passed, but Node status retained `.130`.
+K3s then shut down with `failed to start networking` and
+`failed to find interface with specified node ip`. A later local etcd connection failure
+followed that shutdown. The exact Node object used by the network-policy constructor was
+not captured; the stale-address startup race is strongly supported, not conclusively traced.
+Both supported K3s versions use the same relevant network-policy startup behavior.
+
+Version 2 now validates the target Node name, UID, member binding and resourceVersion,
+rejects deletion and unexpected addresses, and permits only the incident's old or new
+InternalIP. The initial supported shape is one IPv4 InternalIP plus optional matching
+Hostname/InternalDNS entries. ExternalIP and dual-stack layouts require separate review.
+It uses the enrolled API CA and client certificate, verifies the survivor hostname, and pins
+TCP to the discovered address over the enrolled Ethernet interface. Requests do not use
+proxies, redirects or automatic retries. No new dependency or credential is introduced.
+
+If necessary, it conditionally replaces only `k3s.io/internal-ip`, then makes three read-only
+observations separated by two seconds to allow natural status convergence. If status remains
+stale, it conditionally replaces only the InternalIP within `status.addresses` through the
+status subresource. Both JSON patches test UID, resourceVersion, annotations and the prior
+address list. Other status fields, Ready conditions and matching hostname entries are preserved.
+Both surviving APIs must confirm convergence before a start is authorized. This bounded wait
+is not a claim that the cloud controller always converges within four seconds.
+
+Each write has durable intent in `node-address.json` before dispatch. Any uncertain outcome,
+HTTP error or failed readback remains latched, including when DHCP returns to the old address.
+No conditional patch is retried automatically. `resume-node-address` is an explicit read-only
+API reconciliation: it records a confirmed outcome locally but neither sends a patch nor
+starts K3s. An unchanged old value does not prove an unknown request failed, so that case
+stays blocked. Do not clear the journal to force progress. Confirmed address reversion also
+requires operator review. The separate membership journal and its unknown-outcome latch remain.
+
+For new incidents, best-effort diagnostics retain the first matching network-policy address
+failure in `startup-failure.json`, including timestamp and systemd invocation ID. The scan
+covers at most 200 service journal entries since incident creation and stores an allowlisted
+signature, not arbitrary log content. Preserve the full service journal and Node snapshots
+in the lab; absence of this diagnostic does not prove absence of a startup error.
+
+For the isolated lab only, use fresh enrollment on the coordinated healthy rollback copies
+when no enrollment exists. If already enrolled and armed at the previous revision, pause the
+watcher, wait for its service to finish, and require the membership incident absent or complete
+and no unresolved Node-address incident. Verify the old installed runtime against its source
+hash; preserve it as a backup and atomically replace only the root-owned runtime with this
+reviewed revision (mode 0644). This change does not alter hook bytes, resolver configuration,
+enrollment format or dependencies. Compare configuration fingerprints and loaded hooks before
+resuming the timer; do not regenerate enrollment fingerprints or discard journals. If any
+pinned file differs, stop for a separately reviewed migration. Do not replace a runtime while
+an invocation is executing. No script in this change performs migration or enables services.
+
+For qualification, enable the existing automatic timer on the three approved rollback copies,
+verify original identities and healthy workloads, and cold-change only q3. Do not invoke the
+watcher manually. Capture journal transitions, both API readbacks and automatic completion,
+then verify the original IDs, databases, committed markers, all three Ready Nodes and workloads.
+This bounded correction remains unqualified until that test passes on both exact versions.
+
 ### Evidence and acceptance boundary
 
-Unit tests cover all-three startup without quorum, reconciliation before API availability,
-lock release before completion, definite contention, unknown RPC outcomes, stale status,
-workload failures and identity drift. Resolver tests include real isolated multicast discovery,
+Isolated membership models cover the earlier transport-only all-three startup and reconciliation,
+with the new address gate replaced by a test double. They are not end-to-end startup tests.
+Real entry-point tests with fake backends cover surviving-quorum requirements, stale Node
+status, conditional address mutations, identity drift and uncertain-outcome refusal. Isolated
+membership models separately cover lock release, contention and workload completion failures.
+New HTTP API tests verify mocked TLS wiring and single-request behavior, not a real API. Resolver tests include real isolated multicast discovery,
 conflicting answers, withdrawal, ordinary DNS and TCP queries. Transport tests use actual
 mutual TLS and native gRPC; read-only WAL fixtures come from both exact K3s versions.
 
@@ -350,8 +417,10 @@ pass is claimed for the new code. Normal K3s agents additionally require writabl
 capabilities unavailable here; privileges were not expanded. Systemd, kubelet, CNI, real Node
 status, application recovery and native Pi behavior remain acceptance blockers.
 
-Before rollout, repeat both cold and running all-member address changes on representative
-three-server staging, preserving IDs, databases and committed workload data. Include stale
+Before rollout of this bounded correction, qualify cold and running single-member address
+changes with two healthy survivors on representative three-server staging, preserving IDs,
+databases and committed workload data. All-member changes must refuse startup under this
+gate; successful all-member recovery requires a separate design and qualification. Include stale
 Node status, partitions, reused addresses, false discovery and interrupted recovery. Verify
 certificate renewal and completion, not merely etcd quorum or API readiness. Staging and
 production share an unmanaged PoE switch: use isolated staging networking or changes scoped

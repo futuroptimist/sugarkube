@@ -140,6 +140,17 @@ class Backend:
         return {"header": {"cluster_id": "100", "member_id": mid}}
 
 
+class TransportRecovery(M.DualRecovery):
+    """Isolate the existing membership protocol from the new API start gate.
+
+    These tests are transport/state-machine models, not all-member qualification.
+    The real entry points, including refusal without survivors, are tested below.
+    """
+
+    def prepare_node_address(self, ip, old):
+        pass
+
+
 @pytest.fixture
 def recovery(tmp_path):
     cluster = Cluster()
@@ -168,7 +179,7 @@ def recovery(tmp_path):
         }
         directory = tmp_path / mid
         directory.mkdir()
-        result.append(M.DualRecovery(e, Backend(e, cluster), directory / "incident.json"))
+        result.append(TransportRecovery(e, Backend(e, cluster), directory / "incident.json"))
     return cluster, result
 
 
@@ -550,3 +561,319 @@ def test_unknown_acquisition_during_concurrent_progress_never_releases(recovery)
     assert voter.path.read_bytes() == saved and cluster.owner is not None
     assert cluster.updates == []
     assert sum(call == ("txn",) for call in cluster.calls) == 1
+
+
+@pytest.fixture
+def address_recovery(recovery, monkeypatch):
+    cluster, voters = recovery
+    voter = voters[0]
+    voter = M.DualRecovery(voter.e, voter.b, voter.path)
+    cluster.quorum = cluster.api = True
+    cluster.ips.update({"2": "10.0.0.2", "3": "10.0.0.3"})
+    cluster.nodes, cluster.patches = {}, []
+    for mid in ("1", "2", "3"):
+        node = voter.b.node(f"pi{mid}.local", f"pi{mid}")
+        node["metadata"].update(name=f"pi{mid}", resourceVersion="1")
+        node["status"].update(capacity={"cpu": "4"})
+        node["status"]["addresses"].append({"type": "Hostname", "address": f"pi{mid}"})
+        cluster.nodes[f"pi{mid}"] = node
+    local = cluster.nodes["pi1"]
+    local["metadata"]["annotations"]["k3s.io/internal-ip"] = "10.0.0.1"
+    local["status"]["addresses"][0]["address"] = "10.0.0.1"
+
+    def api(host, name, patch=None, status=False):
+        assert host in ("pi2.local", "pi3.local")  # Never depend on the stopped member.
+        node = cluster.nodes[name]
+        if patch is not None:
+            cluster.patches.append(copy.deepcopy(patch))
+            journal = json.loads(voter.address_journal.read_text())
+            assert journal["phase"].endswith("-intent") and journal["patch"] == patch
+            assert not voter.path.exists() or voter.previous()["transport"] != "start-authorized"
+            if cluster.failure == "conflict":
+                node["metadata"]["resourceVersion"] = "2"
+            if cluster.failure == "uid-race":
+                node["metadata"]["uid"] = "replacement"
+            for operation in patch[:-1]:
+                value = node
+                for key in operation["path"].strip("/").split("/"):
+                    value = value[key.replace("~1", "/")]
+                M.require(value == operation["value"], "conditional patch conflict")
+            if cluster.failure == "before-write":
+                raise M.Stop("unknown before write")
+            operation = patch[-1]
+            if status:
+                assert operation["path"] == "/status/addresses"
+                node["status"]["addresses"] = copy.deepcopy(operation["value"])
+            else:
+                assert operation["path"] == "/metadata/annotations/k3s.io~1internal-ip"
+                node["metadata"]["annotations"]["k3s.io/internal-ip"] = operation["value"]
+            node["metadata"]["resourceVersion"] = str(int(node["metadata"]["resourceVersion"]) + 1)
+            if cluster.failure == "after-write":
+                raise M.Stop("unknown after write")
+        return copy.deepcopy(node)
+
+    monkeypatch.setattr(voter.b, "address_node", api, raising=False)
+    monkeypatch.setattr(M.time, "sleep", lambda _: None)
+    return cluster, voter
+
+
+@pytest.mark.parametrize("version", sorted(M.VERSIONS))
+def test_cold_stale_status_converges_before_single_start(address_recovery, version):
+    cluster, voter = address_recovery
+    voter.e["k3s_version"] = version
+    original = copy.deepcopy(cluster.nodes["pi1"])
+    assert voter.pre_start() == "one-start-authorized"
+    assert len(cluster.patches) == 2
+    assert cluster.nodes["pi1"]["status"]["addresses"] == [
+        {"type": "InternalIP", "address": "10.0.0.11"},
+        {"type": "Hostname", "address": "pi1"},
+    ]
+    assert cluster.nodes["pi1"]["status"]["conditions"] == original["status"]["conditions"]
+    assert cluster.nodes["pi1"]["status"]["capacity"] == original["status"]["capacity"]
+    assert cluster.updates == [] and cluster.owner is None
+    with pytest.raises(M.Stop, match="unfinished transport"):
+        voter.pre_start()
+    assert len(cluster.patches) == 2
+
+
+def test_current_annotation_stale_status_regression(address_recovery):
+    cluster, voter = address_recovery
+    cluster.nodes["pi1"]["metadata"]["annotations"]["k3s.io/internal-ip"] = voter.b.address()
+    assert voter.pre_start() == "one-start-authorized"
+    assert len(cluster.patches) == 1
+    assert cluster.patches[0][-1]["path"] == "/status/addresses"
+
+
+def test_cloud_controller_convergence_avoids_status_patch(address_recovery, monkeypatch):
+    cluster, voter = address_recovery
+    original = voter.b.address_node
+
+    def api(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if len(args) > 2 and not args[3]:
+            cluster.nodes["pi1"]["status"]["addresses"][0]["address"] = voter.b.address()
+        return result
+
+    monkeypatch.setattr(voter.b, "address_node", api)
+    assert voter.pre_start() == "one-start-authorized"
+    assert len(cluster.patches) == 1
+
+
+@pytest.mark.parametrize("failure", ["before-write", "after-write", "conflict", "uid-race"])
+@pytest.mark.parametrize("status", [False, True])
+def test_unknown_or_conflicting_node_write_never_replayed(address_recovery, failure, status):
+    cluster, voter = address_recovery
+    if status:
+        cluster.nodes["pi1"]["metadata"]["annotations"]["k3s.io/internal-ip"] = voter.b.address()
+    cluster.failure = failure
+    with pytest.raises(M.Stop):
+        voter.pre_start()
+    assert not voter.path.exists()
+    cluster.failure = None
+    with pytest.raises(M.Stop, match="Node mutation outcome unresolved"):
+        voter.pre_start()
+    assert len(cluster.patches) == 1
+    if failure == "after-write":
+        assert voter.resume_node_address() == "node-mutation-observed; no start authorized"
+        assert not voter.path.exists()
+        assert voter.pre_start() == "one-start-authorized"
+        assert len(cluster.patches) == (1 if status else 2)
+    else:
+        with pytest.raises(M.Stop):
+            voter.resume_node_address()
+        assert len(cluster.patches) == 1
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "uid",
+        "binding",
+        "name",
+        "deleted",
+        "multiple",
+        "unexpected",
+        "external",
+        "duplicate-discovery",
+        "quorum",
+        "survivor",
+        "survivor-url",
+        "config",
+    ],
+)
+def test_node_address_fail_closed_before_mutation(address_recovery, failure):
+    cluster, voter = address_recovery
+    node = cluster.nodes["pi1"]
+    if failure == "uid":
+        node["metadata"]["uid"] = "replacement"
+    elif failure == "binding":
+        node["metadata"]["annotations"]["etcd.k3s.cattle.io/node-name"] = "other"
+    elif failure == "name":
+        node["metadata"]["name"] = "other"
+    elif failure == "deleted":
+        node["metadata"]["deletionTimestamp"] = "now"
+    elif failure == "multiple":
+        node["status"]["addresses"].append({"type": "InternalIP", "address": "10.0.0.12"})
+    elif failure == "unexpected":
+        node["status"]["addresses"][0]["address"] = "10.0.0.250"
+    elif failure == "external":
+        node["status"]["addresses"].append({"type": "ExternalIP", "address": "10.0.0.1"})
+    elif failure == "duplicate-discovery":
+        cluster.ips["2"] = voter.b.address()
+    elif failure == "quorum":
+        cluster.quorum = False
+    elif failure == "survivor":
+        cluster.nodes["pi2"]["status"]["conditions"][0]["status"] = "False"
+    elif failure == "survivor-url":
+        cluster.members["2"]["peerURLs"][0] = "https://10.0.0.200:2380"
+    elif failure == "config":
+        voter.b.config_bad = True
+    with pytest.raises(M.Stop):
+        voter.pre_start()
+    assert not voter.path.exists() and not cluster.patches
+
+
+def test_real_all_member_entry_refuses_without_surviving_quorum(recovery):
+    cluster, voters = recovery
+    for modeled in voters:
+        voter = M.DualRecovery(modeled.e, modeled.b, modeled.path)
+        with pytest.raises(M.Stop, match="no quorum"):
+            voter.pre_start()
+        assert not voter.path.exists()
+    assert cluster.updates == []
+
+
+def test_watcher_reconciles_then_prestart_consumes_once(address_recovery, monkeypatch):
+    cluster, voter = address_recovery
+    now = [100.0]
+    monkeypatch.setattr(M.time, "time", lambda: now[0])
+    assert voter.watch() == "observing"
+    now[0] = 131.0
+    assert voter.watch() == "restart-requested"
+    assert voter.previous()["transport"] == "restart-requested"
+    assert voter.pre_start() == "one-start-authorized"
+    assert len(cluster.patches) == 2
+
+
+def test_resume_preserves_unknown_membership_latch(address_recovery):
+    cluster, voter = address_recovery
+    incident = dict(
+        token="owned",
+        phase="membership-intent",
+        transport="start-authorized",
+        member_id="1",
+        cluster_id="100",
+        ip=voter.b.address(),
+        old_peer_urls=M.dual_urls(voter.local, "10.0.0.1"),
+        mutation_dispatched=True,
+    )
+    M.atomic_json(voter.path, incident)
+    # Model stopped K3s after a previous authorized start, without erasing its latch.
+    original_api = voter.b.address_node
+
+    def api(*args, **kwargs):
+        if len(args) > 2:
+            saved = voter.previous()
+            saved["transport"] = "failed-start"
+            M.atomic_json(voter.path, saved)
+        return original_api(*args, **kwargs)
+
+    voter.b.address_node = api
+    assert voter.resume_transport() == "operator-restart-requested"
+    assert voter.previous()["phase"] == "membership-intent"
+    assert voter.previous()["mutation_dispatched"] is True
+    assert voter.pre_start() == "one-start-authorized"
+    with pytest.raises(M.Stop, match="unknown outcome"):
+        voter.watch()
+    assert cluster.updates == []
+
+
+def test_verified_reversion_and_second_address_change_refused(address_recovery):
+    cluster, voter = address_recovery
+    voter.prepare_node_address(voter.b.address(), "10.0.0.1")
+    cluster.nodes["pi1"]["status"]["addresses"][0]["address"] = "10.0.0.1"
+    with pytest.raises(M.Stop, match="reverted"):
+        voter.pre_start()
+    cluster.ips["1"] = "10.0.0.21"
+    with pytest.raises(M.Stop, match="second address change"):
+        voter.pre_start()
+    assert len(cluster.patches) == 2
+
+
+@pytest.mark.parametrize(
+    "phase", ["annotation-intent", "annotation-confirmed", "status-intent", "verified"]
+)
+@pytest.mark.parametrize("watch", [False, True])
+def test_return_to_baseline_never_bypasses_address_journal(address_recovery, phase, watch):
+    cluster, voter = address_recovery
+    record = voter.address_record(voter.b.address(), "10.0.0.1")
+    record["phase"] = phase
+    M.atomic_json(voter.address_journal, record)
+    cluster.ips["1"] = "10.0.0.1"
+    with pytest.raises(M.Stop, match="journal blocks baseline return"):
+        voter.pre_start(watch=watch)
+    assert not voter.path.exists() and not cluster.patches
+
+
+def test_verified_start_reads_both_survivors(address_recovery, monkeypatch):
+    cluster, voter = address_recovery
+    voter.prepare_node_address(voter.b.address(), "10.0.0.1")
+    original = voter.b.address_node
+
+    def api(host, name, *args):
+        result = original(host, name, *args)
+        if host == "pi3.local" and name == "pi1":
+            result["status"]["addresses"][0]["address"] = "10.0.0.1"
+        return result
+
+    monkeypatch.setattr(voter.b, "address_node", api)
+    with pytest.raises(M.Stop, match="readback has not converged"):
+        voter.pre_start()
+    assert not voter.path.exists() and len(cluster.patches) == 2
+
+
+def test_initiating_error_diagnostic_preserved_without_raw_logs(
+    address_recovery, capsys, monkeypatch
+):
+    cluster, voter = address_recovery
+    voter.pre_start()
+    backend = M.Backend(voter.e)
+    messages = [
+        {"MESSAGE": "secret unrelated journal message"},
+        {
+            "MESSAGE": "failed to start networking: "
+            "unable to initialize network policy controller: "
+            "error getting node subnet: failed to find interface with specified node ip",
+            "__REALTIME_TIMESTAMP": "123456789",
+            "_SYSTEMD_INVOCATION_ID": "original",
+        },
+        {"MESSAGE": "later etcd connection failure"},
+    ]
+    monkeypatch.setattr(backend, "command", lambda argv: "\n".join(map(json.dumps, messages)))
+    M.report_startup_failure(backend, voter.path.parent)
+    finding = json.loads((voter.path.parent / "startup-failure.json").read_text())
+    assert finding["finding"]["invocation_id"] == "original"
+    assert "network-policy-node-ip-interface-mismatch" in capsys.readouterr().out
+    assert "secret" not in json.dumps(finding)
+    monkeypatch.setattr(
+        backend, "startup_failure", lambda _: pytest.fail("must preserve first cause")
+    )
+    M.report_startup_failure(backend, voter.path.parent)
+    assert json.loads((voter.path.parent / "startup-failure.json").read_text()) == finding
+
+
+def test_address_changes_immediately_before_write_are_refused(address_recovery, monkeypatch):
+    cluster, voter = address_recovery
+    original = voter.local_guard
+    calls = [0]
+
+    def guard():
+        calls[0] += 1
+        if calls[0] == 3:  # pre-start, proof, then immediately before dispatch
+            cluster.ips["1"] = "10.0.0.21"
+        return original()
+
+    monkeypatch.setattr(voter, "local_guard", guard)
+    with pytest.raises(M.Stop, match="address changed before Node mutation"):
+        voter.pre_start()
+    assert not cluster.patches and not voter.path.exists()

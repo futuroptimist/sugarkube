@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in, fail-closed recovery of one enrolled etcd member before K3s starts.
 
-No reset, membership add/remove, database operation or status patch exists here.
+No reset, membership add/remove or database edit exists here. Version 2 can
+conditionally reconcile its original Node address through two healthy survivors.
 A watcher may queue one local restart after authenticated recovery; an unfinished
 incident blocks replay. Enrollment and qualification are explicit operator steps.
 The program installs inactive units only when explicitly asked to enroll.
@@ -195,6 +196,35 @@ class Backend:
             ).stdout
         except (OSError, subprocess.SubprocessError) as exc:
             raise Stop("bounded authenticated command failed; incident remains latched") from exc
+
+    def startup_failure(self, since):
+        """Return only an allowlisted signature, never arbitrary journal content."""
+        output = self.command(
+            [
+                "/usr/bin/journalctl",
+                "-u",
+                "k3s.service",
+                "--no-pager",
+                "-n",
+                "200",
+                "-o",
+                "json",
+                f"--since=@{int(since)}",
+            ]
+        )
+        for line in output.splitlines():
+            entry = json.loads(line)
+            message = entry.get("MESSAGE", "")
+            if (
+                "failed to start networking" in message
+                and "failed to find interface with specified node ip" in message.lower()
+            ):
+                return {
+                    "cause": "network-policy-node-ip-interface-mismatch",
+                    "timestamp_us": entry.get("__REALTIME_TIMESTAMP"),
+                    "invocation_id": entry.get("_SYSTEMD_INVOCATION_ID"),
+                }
+        return None
 
     def connect_peer(self, address, port=2379):
         raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -777,6 +807,49 @@ class Backend:
         self.locators[host] = ip
         return ip
 
+    def address_node(self, host, node_name, patch=None, status=False):
+        """One authenticated HTTP request, with no redirects, proxy or retry."""
+        require(host in {m["hostname"] for m in self.e["members"]}, "unenrolled API host")
+        require(re.fullmatch(r"[a-z0-9][a-z0-9-]*", node_name), "invalid Node name")
+        config = yaml.safe_load(Path(self.e["kubeconfig"]).read_text())
+        ca = base64.b64decode(config["clusters"][0]["cluster"]["certificate-authority-data"])
+        user = config["users"][0]["user"]
+        context = ssl.create_default_context(cadata=ca.decode())
+        # load_cert_chain needs paths; temporary credentials are private and removed
+        # before the request, including on failure. Never change enrolled credentials.
+        with tempfile.TemporaryDirectory(prefix="sugarkube-api-") as directory:
+            paths = []
+            for key in ("client-certificate-data", "client-key-data"):
+                path = Path(directory) / key
+                with path.open("xb") as handle:
+                    os.chmod(path, 0o600)
+                    handle.write(base64.b64decode(user[key]))
+                paths.append(str(path))
+            context.load_cert_chain(*paths)
+        connection = http.client.HTTPConnection(host, 6443, timeout=5)
+        raw = self.connect_peer(self.resolve(host), port=6443)
+        try:
+            connection.sock = context.wrap_socket(raw, server_hostname=host)
+            route = f"/api/v1/nodes/{node_name}" + ("/status" if status else "")
+            connection.request(
+                "PATCH" if patch is not None else "GET",
+                route,
+                body=json.dumps(patch) if patch is not None else None,
+                headers={"Content-Type": "application/json-patch+json", "Connection": "close"},
+            )
+            response = connection.getresponse()
+            data = response.read(1024 * 1024 + 1)
+            require(response.status == 200, f"Node API HTTP {response.status}; no retry")
+            require(len(data) <= 1024 * 1024, "Node API response too large")
+            return json.loads(data)
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            raise Stop(
+                "Node API transport/response failed; mutation intent remains latched"
+            ) from exc
+        finally:
+            raw.close()
+            connection.close()
+
     def node(self, host, node_name):
         return json.loads(
             self.command(
@@ -1241,6 +1314,7 @@ class DualRecovery(Recovery):
             incident = {
                 "token": uuid.uuid4().hex,
                 "phase": "transport-pending",
+                "created_at": time.time(),
                 "kind": "enrollment",
                 "transport": "not-needed",
                 "ip": ip,
@@ -1296,6 +1370,217 @@ class DualRecovery(Recovery):
         self.b.network(ip)
         return ip
 
+    @property
+    def address_journal(self):
+        return self.path.parent / "node-address.json"
+
+    def address_identity(self, node, member):
+        metadata = node["metadata"]
+        require(
+            metadata["name"] == member["hostname"].removesuffix(".local")
+            and metadata["uid"] == member["node_uid"]
+            and metadata["annotations"].get("etcd.k3s.cattle.io/node-name") == member["name"]
+            and not metadata.get("deletionTimestamp")
+            and isinstance(metadata["resourceVersion"], str)
+            and bool(metadata["resourceVersion"]),
+            "Node name/UID/member binding or resourceVersion changed",
+        )
+
+    def address_proof(self, ip, old):
+        require(self.local_guard() == ip, "Node address incident changed")
+        # DualRecovery normally uses its local etcd endpoint. This pre-start proof
+        # must use survivors exclusively, including the linearizable member list.
+        proof = Recovery(self.e, self.b, self.path)
+        current, members = proof.prove_etcd()
+        require(current == ip, "Ethernet address changed during Node proof")
+        addresses = {m["id"]: self.b.resolve(m["hostname"]) for m in self.e["members"]}
+        require(len(set(addresses.values())) == 3, "duplicate discovered member addresses")
+        require(
+            members[self.local["id"]]["peerURLs"]
+            in (dual_urls(self.local, old), dual_urls(self.local, ip)),
+            "local peer URL changed outside address incident",
+        )
+        for member in self.survivors:
+            host = member["hostname"]
+            require(
+                members[member["id"]]["peerURLs"] == dual_urls(member, addresses[member["id"]]),
+                "survivor peer address has not converged",
+            )
+            node = self.b.address_node(host, host.removesuffix(".local"))
+            self.address_identity(node, member)
+            require(
+                node["metadata"]["annotations"].get("k3s.io/internal-ip") == addresses[member["id"]]
+                and [a["address"] for a in node["status"]["addresses"] if a["type"] == "InternalIP"]
+                == [addresses[member["id"]]]
+                and any(
+                    c.get("type") == "Ready" and c.get("status") == "True"
+                    for c in node["status"].get("conditions", [])
+                ),
+                "two healthy converged surviving Nodes required; all-member recovery unsupported",
+            )
+        node = self.b.address_node(proof.host, self.local["hostname"].removesuffix(".local"))
+        self.address_identity(node, self.local)
+        annotation = node["metadata"]["annotations"].get("k3s.io/internal-ip")
+        addresses = node["status"]["addresses"]
+        internal = [a["address"] for a in addresses if a["type"] == "InternalIP"]
+        require(
+            annotation in (old, ip) and len(internal) == 1 and internal[0] in (old, ip),
+            "unexpected Node address; only incident old/new IPv4 allowed",
+        )
+        for address in addresses:
+            require(set(address) == {"type", "address"}, "unexpected Node address fields")
+            require(
+                address["type"] == "InternalIP"
+                or (
+                    address["type"] in ("Hostname", "InternalDNS")
+                    and address["address"]
+                    in (self.local["hostname"], self.local["hostname"].removesuffix(".local"))
+                ),
+                "unsupported Node address layout; preserve for operator review",
+            )
+        return proof.host, node
+
+    def address_record(self, ip, old):
+        record = (
+            json.loads(self.address_journal.read_text()) if self.address_journal.exists() else None
+        )
+        if record:
+            require(
+                record["cluster_id"] == self.e["cluster_id"]
+                and record["member_id"] == self.local["id"]
+                and record["node_uid"] == self.local["node_uid"],
+                "Node address journal identity changed",
+            )
+            if (record["ip"], record["old_ip"]) != (ip, old):
+                require(
+                    record["phase"] == "verified" and record["ip"] == old,
+                    "unfinished Node address incident or second address change",
+                )
+                record = None
+        if record is None:
+            record = dict(
+                cluster_id=self.e["cluster_id"],
+                member_id=self.local["id"],
+                node_uid=self.local["node_uid"],
+                ip=ip,
+                old_ip=old,
+                phase="prepared",
+            )
+        return record
+
+    def address_patch(self, record, host, node, path, value, phase, status=False):
+        metadata = node["metadata"]
+        patch = [
+            {"op": "test", "path": "/metadata/uid", "value": metadata["uid"]},
+            {
+                "op": "test",
+                "path": "/metadata/resourceVersion",
+                "value": metadata["resourceVersion"],
+            },
+            {"op": "test", "path": "/metadata/annotations", "value": metadata["annotations"]},
+            {"op": "test", "path": "/status/addresses", "value": node["status"]["addresses"]},
+            {"op": "replace", "path": path, "value": value},
+        ]
+        require(self.local_guard() == record["ip"], "address changed before Node mutation")
+        record.update(phase=phase + "-intent", patch=patch, status=status)
+        atomic_json(self.address_journal, record)
+        self.b.address_node(host, self.local["hostname"].removesuffix(".local"), patch, status)
+        # Even a successful HTTP response requires an independent authenticated read.
+        _, fresh = self.address_proof(record["ip"], record["old_ip"])
+        self.confirm_address_patch(record, fresh)
+        record["phase"] = phase + "-confirmed"
+        atomic_json(self.address_journal, record)
+
+    def confirm_address_patch(self, record, node):
+        target = record["patch"][-1]["value"]
+        actual = (
+            node["status"]["addresses"]
+            if record["status"]
+            else node["metadata"]["annotations"].get("k3s.io/internal-ip")
+        )
+        require(actual == target, "Node mutation outcome not confirmed; no replay")
+
+    def prepare_node_address(self, ip, old):
+        record = self.address_record(ip, old)
+        require(
+            not record["phase"].endswith("-intent"),
+            "Node mutation outcome unresolved; use read-only resume-node-address; no retry",
+        )
+        host, node = self.address_proof(ip, old)
+        if record["phase"] == "verified":
+            require(
+                node["metadata"]["annotations"]["k3s.io/internal-ip"] == ip
+                and [a["address"] for a in node["status"]["addresses"] if a["type"] == "InternalIP"]
+                == [ip],
+                "verified Node address reverted; operator review required",
+            )
+            self.address_readback(ip)
+            return
+        if node["metadata"]["annotations"]["k3s.io/internal-ip"] != ip:
+            require(record["phase"] == "prepared", "confirmed annotation reverted")
+            self.address_patch(
+                record, host, node, "/metadata/annotations/k3s.io~1internal-ip", ip, "annotation"
+            )
+        # Give the cloud controller a bounded chance to converge naturally. These
+        # are read-only polls, never retries of a mutation. A later watcher can
+        # continue confirmed work; unknown writes require explicit reconciliation.
+        for attempt in range(3):
+            host, node = self.address_proof(ip, old)
+            require(
+                node["metadata"]["annotations"]["k3s.io/internal-ip"] == ip,
+                "Node annotation reverted before status convergence",
+            )
+            if [a["address"] for a in node["status"]["addresses"] if a["type"] == "InternalIP"] == [
+                ip
+            ]:
+                break
+            if attempt < 2:
+                time.sleep(2)
+        else:
+            require(
+                record["phase"] in ("prepared", "annotation-confirmed"), "confirmed status reverted"
+            )
+            desired = [
+                dict(a, address=ip) if a["type"] == "InternalIP" else a
+                for a in node["status"]["addresses"]
+            ]
+            self.address_patch(
+                record, host, node, "/status/addresses", desired, "status", status=True
+            )
+        self.address_readback(ip)
+        record["phase"] = "verified"
+        atomic_json(self.address_journal, record)
+
+    def address_readback(self, ip):
+        # Both survivor APIs are checked again when a start is consumed.
+        for member in self.survivors:
+            fresh = self.b.address_node(
+                member["hostname"], self.local["hostname"].removesuffix(".local")
+            )
+            self.address_identity(fresh, self.local)
+            require(
+                fresh["metadata"]["annotations"]["k3s.io/internal-ip"] == ip
+                and [
+                    a["address"] for a in fresh["status"]["addresses"] if a["type"] == "InternalIP"
+                ]
+                == [ip],
+                "Node address readback has not converged",
+            )
+        require(self.local_guard() == ip, "address changed after Node reconciliation")
+
+    def resume_node_address(self):
+        require(self.address_journal.exists(), "no Node address incident")
+        record = json.loads(self.address_journal.read_text())
+        record = self.address_record(record["ip"], record["old_ip"])
+        require(
+            record["phase"] in ("annotation-intent", "status-intent"), "no unknown Node mutation"
+        )
+        _, node = self.address_proof(record["ip"], record["old_ip"])
+        self.confirm_address_patch(record, node)
+        record["phase"] = record["phase"].replace("-intent", "-confirmed")
+        atomic_json(self.address_journal, record)
+        return "node-mutation-observed; no start authorized"
+
     def pre_start(self, watch=False):
         previous = self.previous()
         baseline = (
@@ -1307,10 +1592,19 @@ class DualRecovery(Recovery):
             if not watch and previous.get("transport") == "restart-requested":
                 require(ip == previous["ip"], "pending transport address changed")
                 self.local_guard()
+                old = urlsplit(previous["old_peer_urls"][0]).hostname
+                self.prepare_node_address(ip, old)
                 previous["transport"] = "start-authorized"
                 atomic_json(self.path, previous)
                 return "one-start-authorized"
             raise Stop("unfinished transport authorization; explicit reconciliation required")
+        if ip == baseline and self.address_journal.exists():
+            record = json.loads(self.address_journal.read_text())
+            record = self.address_record(record["ip"], record["old_ip"])
+            require(
+                record["phase"] == "verified" and record["ip"] == ip,
+                "Node address journal blocks baseline return; preserve mutation outcome",
+            )
         if ip == baseline:
             if not watch:
                 self.b.network(ip)
@@ -1329,9 +1623,11 @@ class DualRecovery(Recovery):
         else:
             self.b.stable_address(ip)
         require(self.local_guard() == ip, "local address changed before transport start")
+        self.prepare_node_address(ip, baseline)
         incident = {
             "token": uuid.uuid4().hex,
             "phase": "transport-pending",
+            "created_at": time.time(),
             "kind": "recovery",
             "transport": "restart-requested" if watch else "start-authorized",
             "ip": ip,
@@ -1472,6 +1768,7 @@ class DualRecovery(Recovery):
         require(incident and incident["phase"] != "complete", "no pending incident")
         require(self.local_guard() == incident["ip"], "pending address changed")
         self.b.stable_address(incident["ip"])
+        self.prepare_node_address(incident["ip"], urlsplit(incident["old_peer_urls"][0]).hostname)
         incident["transport"] = "restart-requested"
         incident["operator_transport_resumes"] = incident.get("operator_transport_resumes", 0) + 1
         atomic_json(self.path, incident)
@@ -1734,6 +2031,34 @@ def private_state(path):
     )
 
 
+def report_startup_failure(backend, state_dir):
+    """Best effort: preserve the initiating error without masking the guard failure."""
+    if backend is None:
+        return
+    try:
+        incident = json.loads((state_dir / "incident.json").read_text())
+        since = incident.get("created_at")
+        if since is None:
+            return
+        path = state_dir / "startup-failure.json"
+        previous = json.loads(path.read_text()) if path.exists() else {}
+        if previous.get("token") == incident["token"]:
+            finding = previous["finding"]
+        else:
+            finding = backend.startup_failure(since)
+            if not finding:
+                return
+            atomic_json(path, {"token": incident["token"], "finding": finding})
+        print(
+            "Earlier K3s startup failure: "
+            + finding["cause"]
+            + "; inspect k3s.service journal and preserve Node snapshots. "
+            "A later etcd connection failure may follow service shutdown."
+        )
+    except (OSError, ValueError, KeyError, TypeError, Stop):
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1749,6 +2074,7 @@ def main():
             "watch",
             "resume",
             "resume-transport",
+            "resume-node-address",
         ],
     )
     parser.add_argument("--enrollment", type=Path, default=ENROLLMENT)
@@ -1792,6 +2118,7 @@ def main():
                         "arm": recovery.arm,
                         "resume-peer-enrollment": lambda: recovery.enroll_peer(resume=True),
                         "resume-transport": recovery.resume_transport,
+                        "resume-node-address": recovery.resume_node_address,
                     }
                     if enrollment["schema_version"] == 2
                     else {}
@@ -1806,6 +2133,7 @@ def main():
         print(action)
         return 0
     except Stop as exc:
+        report_startup_failure(backend, args.state_dir)
         print(f"Ethernet recovery blocked: {exc}. Preserve the incident for operator review.")
         return 2
     except (

@@ -1301,3 +1301,91 @@ def test_only_explicit_enrollment_can_prove_before_hook_installation(enrollment,
         backend.config()
     backend.enrolling = True
     backend.config()
+
+
+@pytest.mark.parametrize("failure", [None, "tls", "conflict", "redirect", "lost-response"])
+def test_node_api_single_request_pins_tls_and_never_retries(
+    enrollment, tmp_path, monkeypatch, failure
+):
+    import ssl
+    from types import SimpleNamespace
+
+    config = tmp_path / "kubeconfig"
+    config.write_text(
+        json.dumps(
+            {
+                "clusters": [{"cluster": {"certificate-authority-data": MODULE.encode("CA")}}],
+                "users": [
+                    {
+                        "user": {
+                            "client-certificate-data": MODULE.encode("CERT"),
+                            "client-key-data": MODULE.encode("KEY"),
+                        }
+                    }
+                ],
+            }
+        )
+    )
+    enrollment["kubeconfig"] = str(config)
+    backend = MODULE.Backend(enrollment)
+    calls, paths = [], []
+
+    class Context:
+        def load_cert_chain(self, cert, key):
+            paths.extend([Path(cert), Path(key)])
+            assert [p.read_text() for p in paths] == ["CERT", "KEY"]
+            assert all(p.stat().st_mode & 0o077 == 0 for p in paths)
+
+        def wrap_socket(self, raw, server_hostname):
+            assert server_hostname == "pi1.local"
+            if failure == "tls":
+                raise ssl.SSLError("wrong certificate")
+            return raw
+
+    def context(**kwargs):
+        assert kwargs == {"cadata": "CA"}
+        return Context()
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            assert (host, port, timeout) == ("pi1.local", 6443, 5)
+
+        def request(self, method, route, body, headers):
+            assert not any(p.exists() for p in paths)
+            calls.append((method, route, body, headers))
+
+        def getresponse(self):
+            if failure == "lost-response":
+                raise OSError("response lost")
+            return SimpleNamespace(
+                status={"conflict": 409, "redirect": 307}.get(failure, 200),
+                read=lambda size: b'{"metadata": {"uid": "original"}}',
+            )
+
+        def close(self):
+            pass
+
+    def connect(address, port):
+        assert (address, port) == ("10.0.0.11", 6443)
+        return SimpleNamespace(close=lambda: None)
+
+    monkeypatch.setattr(MODULE.ssl, "create_default_context", context)
+    monkeypatch.setattr(MODULE.http.client, "HTTPConnection", Connection)
+    monkeypatch.setattr(backend, "connect_peer", connect)
+    monkeypatch.setattr(backend, "resolve", lambda host: "10.0.0.11")
+    patch = [{"op": "test", "path": "/metadata/uid", "value": "original"}]
+    if failure:
+        with pytest.raises(MODULE.Stop):
+            backend.address_node("pi1.local", "pi0", patch, status=True)
+    else:
+        assert (
+            backend.address_node("pi1.local", "pi0", patch, status=True)["metadata"]["uid"]
+            == "original"
+        )
+    assert len(calls) == (0 if failure == "tls" else 1)
+    if calls:
+        method, route, body, headers = calls[0]
+        assert method == "PATCH" and route == "/api/v1/nodes/pi0/status"
+        assert json.loads(body) == patch
+        assert headers["Content-Type"] == "application/json-patch+json"
+    assert not any(p.exists() for p in paths)
