@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/k3s-io/etcd",
+  "commit": "9f7f2c9540f1211570c2f23fd0baafc1d537662d",
+  "version": "v3.6.7-k3s1",
+  "descriptor_sha256": "4ff408bd7b84e57c41b0504831efe7c4d16eb9a27ecd06d970dd55a85f67ff9d",
+  "files": {
+    "kv": {
+      "source": "api/mvccpb/kv.pb.go",
+      "go_sha256": "648718f9d9ed8224f9e8c5402e0625070ee5290a3850fd50c8747ae6a75f272a",
+      "original_descriptor_sha256": "fc3c851c78b69c127e29c1489cb0d7639e5782901804286ccf2650834fcf0233",
+      "original_dependencies": [
+        "gogoproto/gogo.proto"
+      ]
+    },
+    "auth": {
+      "source": "api/authpb/auth.pb.go",
+      "go_sha256": "f8f954954a1bd915e1fcfce039a255315391d3c03176c5d7d2e747365fae1b24",
+      "original_descriptor_sha256": "cc586bd2be9183fd538156aa52eb7b0e934006320fe34efc6c00f1697b641f85",
+      "original_dependencies": [
+        "gogoproto/gogo.proto"
+      ]
+    },
+    "rpc": {
+      "source": "api/etcdserverpb/rpc.pb.go",
+      "go_sha256": "71f790a218dead56ab83e4605e13783135cae571f2319b8e542d35a7c26e635b",
+      "original_descriptor_sha256": "4f9663256f600411b2a5b72a87594067233422fb09f79d54f6262688ee49bbe2",
+      "original_dependencies": [
+        "gogoproto/gogo.proto",
+        "etcd/api/mvccpb/kv.proto",
+        "etcd/api/authpb/auth.proto",
+        "etcd/api/versionpb/version.proto",
+        "google/api/annotations.proto",
+        "protoc-gen-openapiv2/options/annotations.proto"
+      ]
+    }
+  }
+}

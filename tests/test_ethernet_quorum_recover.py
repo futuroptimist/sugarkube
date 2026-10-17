@@ -62,6 +62,9 @@ class FakeBackend:
             },
         }
 
+    def close(self):
+        pass
+
     def config(self):
         if self.fail == "config":
             raise MODULE.Stop("changed configuration")
@@ -215,6 +218,29 @@ def test_stale_node_status_prevents_completion_without_patch(enrollment, tmp_pat
     assert complete(recovery) == "complete"
 
 
+def test_unknown_lock_transaction_preserves_intent_and_blocks_replay(enrollment, tmp_path):
+    backend = FakeBackend(enrollment)
+    original_etcd = backend.etcd
+
+    def lose_response(host, *args, input_text=None):
+        result = original_etcd(host, *args, input_text=input_text)
+        if args == ("txn",):
+            raise MODULE.Stop("unknown CAS outcome after dispatch")
+        return result
+
+    backend.etcd = lose_response
+    recovery = MODULE.Recovery(enrollment, backend, tmp_path / "incident.json")
+    with pytest.raises(MODULE.Stop, match="unknown CAS"):
+        recovery.pre_start()
+    before = recovery.path.read_bytes()
+    calls = list(backend.calls)
+    assert backend.owner == json.loads(before)["token"]
+    assert not updates(backend)
+    with pytest.raises(MODULE.Stop, match="unfinished"):
+        recovery.watch()
+    assert recovery.path.read_bytes() == before and backend.calls == calls
+
+
 @pytest.mark.parametrize("change", ["uid", "name", "learner", "unknown_member", "external_url"])
 def test_membership_and_node_binding_changes_are_refused(enrollment, tmp_path, change):
     backend = FakeBackend(enrollment)
@@ -296,53 +322,30 @@ def test_watcher_lease_flap_resets_stability_window(enrollment, tmp_path, monkey
     assert not updates(backend)
 
 
-def test_gateway_pins_tls_identity_and_never_reconnects(enrollment, monkeypatch):
+def test_backend_session_failure_never_reconnects(enrollment):
     from types import SimpleNamespace
 
-    enrollment["etcd_tls"] = {
-        "ca": "/synthetic/ca",
-        "cert": "/synthetic/cert",
-        "key": "/synthetic/key",
-    }
-    tls_calls = []
-    raw = SimpleNamespace(close=lambda: tls_calls.append("raw-closed"))
-    context = SimpleNamespace(
-        load_cert_chain=lambda *args: tls_calls.append(args),
-        wrap_socket=lambda sock, server_hostname: tls_calls.append(server_hostname) or raw,
-    )
-    monkeypatch.setattr(MODULE.ssl, "create_default_context", lambda **kw: context)
-    monkeypatch.setattr(MODULE.socket, "create_connection", lambda *a, **kw: raw)
-    responses = [
-        {"header": {"cluster_id": "100", "member_id": "2"}},
-        {"header": {"cluster_id": "100", "member_id": "999"}},
-    ]
-
-    class Connection:
-        sock = None
-
-        def request(self, *args):
-            tls_calls.append(args)
-
-        def getresponse(self):
-            return SimpleNamespace(
-                status=200, read=lambda size: json.dumps(responses.pop(0)).encode()
-            )
-
-        def close(self):
-            self.sock = None
-
-    connection = Connection()
-    monkeypatch.setattr(MODULE.http.client, "HTTPConnection", lambda *a, **kw: connection)
     backend = MODULE.Backend(enrollment)
+    opened, calls, closed = [], [], []
     backend.resolve = lambda host: "10.0.0.11"
-    backend.connect_peer = lambda address: raw
+
+    def request(route, payload):
+        calls.append((route, payload))
+        if len(calls) > 1:
+            raise RuntimeError("session lost after possible mutation")
+        return {"header": {"cluster_id": "100", "member_id": "2"}}
+
+    def open_session(host, address, expected):
+        opened.append((host, address, expected["id"]))
+        return SimpleNamespace(request=request, close=lambda: closed.append(True))
+
+    backend.open_session = open_session
     assert backend.request("pi1.local", "/v3/kv/range", {})["header"]["member_id"] == "2"
-    assert "pi1.local" in tls_calls
-    assert ("/synthetic/cert", "/synthetic/key") in tls_calls
-    with pytest.raises(MODULE.Stop, match="identity mismatch"):
-        backend.request("pi1.local", "/v3/kv/range", {})
-    with pytest.raises(MODULE.Stop, match="no automatic reconnect"):
-        backend.request("pi1.local", "/v3/kv/range", {})
+    for _ in range(2):
+        with pytest.raises(MODULE.Stop, match="no automatic reconnect"):
+            backend.request("pi1.local", "/v3/kv/range", {})
+    assert opened == [("pi1.local", "10.0.0.11", "2")]
+    assert len(calls) == 2 and closed == [True]
 
 
 def test_backend_inventory_pins_all_inputs_and_rejects_overrides(enrollment, tmp_path, monkeypatch):
@@ -485,7 +488,7 @@ def test_backend_address_discovery_commands_are_bounded(enrollment, tmp_path, mo
     assert "--tls-server-name=pi1.local" in commands[-1]
 
 
-def test_gateway_routes_are_limited_to_approved_operations(enrollment):
+def test_grpc_routes_are_limited_to_approved_operations(enrollment):
     backend = MODULE.Backend(enrollment)
     requests = []
     backend.request = lambda host, route, payload: requests.append((route, payload)) or {
@@ -502,6 +505,18 @@ def test_gateway_routes_are_limited_to_approved_operations(enrollment):
         {"ID": "10", "peerURLs": ["https://10.0.0.20:2380"]},
     )
     assert requests[3][1]["serializable"] is False
+    assert requests[0][1]["linearizable"] is True
+    backend.etcd(
+        "pi1.local",
+        "member",
+        "update",
+        "fffffffffffffffd",
+        "--peer-urls=https://10.0.0.20:2380,https://pi1.local:2380",
+    )
+    assert requests[-1][1] == {
+        "ID": "18446744073709551613",
+        "peerURLs": ["https://10.0.0.20:2380", "https://pi1.local:2380"],
+    }
     with pytest.raises(MODULE.Stop, match="unsupported"):
         backend.etcd("pi1.local", "member", "remove", "1")
 
@@ -547,7 +562,15 @@ def test_explicit_enrollment_installs_inactive_units_only(
     monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
     paths = {
         key: tmp_path / key
-        for key in ["RUNTIME", "HOOK", "WATCH_SERVICE", "WATCH_TIMER", "ENROLLMENT"]
+        for key in [
+            "RUNTIME",
+            "TRANSPORT",
+            "DESCRIPTOR",
+            "HOOK",
+            "WATCH_SERVICE",
+            "WATCH_TIMER",
+            "ENROLLMENT",
+        ]
     }
     for key, path in paths.items():
         monkeypatch.setattr(MODULE, key, path)
@@ -633,24 +656,20 @@ def test_connection_uses_only_enrolled_ethernet_and_closes_on_failure(enrollment
     assert calls[-1] == ("closed",)
 
 
-def test_failed_tls_handshake_cannot_issue_request(enrollment, monkeypatch):
-    from types import SimpleNamespace
-
-    enrollment["etcd_tls"] = {"ca": "synthetic", "cert": "synthetic", "key": "synthetic"}
-    closed = []
-    raw = SimpleNamespace(close=lambda: closed.append(True))
-
-    def fail(*args, **kwargs):
-        raise MODULE.ssl.SSLError("untrusted peer")
-
-    context = SimpleNamespace(load_cert_chain=lambda *a: None, wrap_socket=fail)
-    monkeypatch.setattr(MODULE.ssl, "create_default_context", lambda **kw: context)
+def test_failed_tls_handshake_cannot_issue_request(enrollment):
     backend = MODULE.Backend(enrollment)
     backend.resolve = lambda host: "10.0.0.11"
-    backend.connect_peer = lambda address: raw
-    with pytest.raises(MODULE.ssl.SSLError):
-        backend.request("pi1.local", "/v3/kv/range", {})
-    assert closed == [True] and not backend.connections
+    attempts = []
+
+    def fail(*args):
+        attempts.append(args)
+        raise RuntimeError("untrusted peer")
+
+    backend.open_session = fail
+    for _ in range(2):
+        with pytest.raises(MODULE.Stop, match="no automatic reconnect"):
+            backend.request("pi1.local", "/v3/kv/range", {})
+    assert len(attempts) == 1 and backend.connections == {"pi1.local": None}
 
 
 def test_network_snapshot_must_match_current_address(enrollment, tmp_path, monkeypatch):
@@ -734,7 +753,9 @@ def test_cli_releases_lock_before_requesting_restart(
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             restarts.append(operator)
 
-    monkeypatch.setattr(MODULE, "Backend", lambda e: SimpleNamespace(restart=restart))
+    monkeypatch.setattr(
+        MODULE, "Backend", lambda e: SimpleNamespace(restart=restart, close=lambda: None)
+    )
     monkeypatch.setattr(
         MODULE,
         "Recovery",
@@ -1077,7 +1098,7 @@ def test_disposable_etcd_preserves_identity_and_data(tmp_path, monkeypatch, star
         bad["members"][1]["hostname"] = "wrong.local"
         untrusted = LocalBackend(bad)
         untrusted.resolve = lambda host: ips[1]
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(MODULE.Stop, match="authenticated gRPC failed"):
             untrusted.request("wrong.local", "/v3/kv/range", {"key": MODULE.encode("test-marker")})
         backend = LocalBackend(e)
         recovery = MODULE.Recovery(e, backend, tmp_path / "incident.json")

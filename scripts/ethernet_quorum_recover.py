@@ -14,6 +14,7 @@ import base64
 import fcntl
 import hashlib
 import http.client
+import importlib.util
 import ipaddress
 import json
 import os
@@ -36,6 +37,10 @@ HOOK = Path("/etc/systemd/system/k3s.service.d/30-sugarkube-quorum-recovery.conf
 NETWORK_HOOK = "/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf"
 WATCH_SERVICE = Path("/etc/systemd/system/sugarkube-ethernet-recovery.service")
 WATCH_TIMER = Path("/etc/systemd/system/sugarkube-ethernet-recovery.timer")
+TRANSPORT = RUNTIME.with_name("ethernet_etcd_grpc.py")
+DESCRIPTOR = RUNTIME.with_name("ethernet-etcd.desc")
+WAL_RUNTIME = RUNTIME.with_name("ethernet_wal_identity.py")
+DNS_HOOK = "/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf"
 ENROLLMENT = Path("/etc/rancher/k3s/sugarkube-recovery.json")
 VERSIONS = {"v1.35.4+k3s1", "v1.34.5+k3s1"}
 
@@ -55,6 +60,22 @@ def encode(value):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def sibling(name):
+    source = Path(__file__).with_name(name + ".py")
+    spec = importlib.util.spec_from_file_location("sugarkube_" + name, source)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        raise Stop("required recovery dependency unavailable") from exc
+    return module
+
+
+def dual_urls(member, address):
+    address = str(ipaddress.IPv4Address(address))
+    return [f"https://{address}:2380", f"https://{member['hostname']}:2380"]
 
 
 def recovery_hook():
@@ -90,7 +111,9 @@ def atomic_write(path, content):
 
 
 def validate_enrollment(e):
-    require(type(e["schema_version"]) is int and e["schema_version"] == 1, "unsupported enrollment")
+    require(
+        type(e["schema_version"]) is int and e["schema_version"] in (1, 2), "unsupported enrollment"
+    )
     require(e["k3s_version"] in VERSIONS, "unqualified K3s version")
     require(re.fullmatch(r"[a-zA-Z0-9_.:-]+", e["interface"]), "invalid interface")
     require(not e["interface"].startswith("wl"), "Ethernet only")
@@ -98,6 +121,7 @@ def validate_enrollment(e):
     ids, hosts, names = set(), set(), set()
     for member in e["members"]:
         require(re.fullmatch(r"[1-9][0-9]*", member["id"]), "decimal member ID required")
+        require(int(member["id"]) < 2**64, "member ID exceeds uint64")
         require(re.fullmatch(r"[a-z0-9][a-z0-9-]*\.local", member["hostname"]), "invalid hostname")
         require(member["name"] and member["node_uid"], "member and Node identity required")
         ids.add(member["id"])
@@ -106,9 +130,35 @@ def validate_enrollment(e):
     require(len(ids) == len(hosts) == len(names) == 3, "duplicate enrollment identity")
     require(e["local_member_id"] in ids, "local member not enrolled")
     require(re.fullmatch(r"[1-9][0-9]*", e["cluster_id"]), "decimal cluster ID required")
+    require(int(e["cluster_id"]) < 2**64, "cluster ID exceeds uint64")
     require(e["verified_backup"] is True, "operator-verified recovery backup required")
     ipaddress.IPv4Address(e["local_ipv4"])
     require(e["files"], "effective configuration files must be enrolled")
+    if e["schema_version"] == 2:
+        checks = e.get("completion_https_urls", [])
+        require(
+            isinstance(checks, list) and 1 <= len(checks) <= 8,
+            "explicit application HTTPS completion checks required",
+        )
+        for value in checks:
+            url = urlsplit(value)
+            require(
+                url.scheme == "https"
+                and url.hostname
+                and "." in url.hostname
+                and "@" not in url.netloc
+                and not url.query
+                and not url.fragment
+                and url.port not in (2379, 2380, 2381, 2382, 6443, 6444),
+                "application completion URL must use HTTPS without credentials "
+                "or control-plane ports",
+            )
+            try:
+                ipaddress.ip_address(url.hostname)
+            except ValueError:
+                pass
+            else:
+                raise Stop("completion URL must use a stable DNS hostname")
     for path, expected in e["files"].items():
         require(
             Path(path).is_absolute()
@@ -123,6 +173,7 @@ class Backend:
     def __init__(self, enrollment):
         self.e = enrollment
         self.enrolling = False
+        self.preparing = False
         self.connections = {}
         self.locators = {}
 
@@ -145,7 +196,7 @@ class Backend:
         except (OSError, subprocess.SubprocessError) as exc:
             raise Stop("bounded authenticated command failed; incident remains latched") from exc
 
-    def connect_peer(self, address):
+    def connect_peer(self, address, port=2379):
         raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             raw.settimeout(5)
@@ -153,62 +204,62 @@ class Backend:
                 socket.SOL_SOCKET, socket.SO_BINDTODEVICE, self.e["interface"].encode() + b"\0"
             )
             raw.bind((self.address(), 0))
-            raw.connect((address, 2379))
+            raw.connect((address, port))
             return raw
         except Exception:
             raw.close()
             raise
 
-    def request(self, host, route, payload):
-        """Use one pinned-address, hostname-verified TLS session per enrolled voter.
+    def open_session(self, host, address, expected):
+        # -I intentionally excludes the script directory from sys.path. Load only
+        # this installed sibling, not a module selected from the environment.
+        module = sibling("ethernet_etcd_grpc")
+        return module.Session(
+            host,
+            self.e["cluster_id"],
+            expected["id"],
+            self.e["etcd_tls"],
+            lambda: self.connect_peer(address),
+        )
 
-        Never reconnect automatically between health proof and a mutation. Every
-        response must bind its cluster/member identity, including linearizable reads.
-        """
+    def request(self, host, route, payload):
+        """One pinned gRPC session per voter; any failure forbids reconnect/replay."""
         expected = next(m for m in self.e["members"] if m["hostname"] == host)
-        if host not in self.connections:
-            address = self.resolve(host)
-            tls = self.e["etcd_tls"]
-            context = ssl.create_default_context(cafile=tls["ca"])
-            context.load_cert_chain(tls["cert"], tls["key"])
-            connection = http.client.HTTPConnection(host, 2379, timeout=5)
-            raw = self.connect_peer(address)
-            try:
-                connection.sock = context.wrap_socket(raw, server_hostname=host)
-            except Exception:
-                raw.close()
-                raise
-            self.connections[host] = connection
-        connection = self.connections[host]
-        require(connection.sock is not None, "authenticated session ended; no automatic reconnect")
         try:
-            connection.request(
-                "POST", route, json.dumps(payload), {"Content-Type": "application/json"}
-            )
-            response = connection.getresponse()
-            raw = response.read(1024 * 1024 + 1)
-            require(
-                response.status == 200 and len(raw) <= 1024 * 1024, "etcd gateway request failed"
-            )
-            result = json.loads(raw)
-            require(
-                str(result["header"]["cluster_id"]) == self.e["cluster_id"]
-                and str(result["header"]["member_id"]) == expected["id"],
-                "authenticated response identity mismatch",
-            )
-            return result
-        except Exception:
-            connection.close()
-            raise
+            if host not in self.connections:
+                # Latch even failed resolution/handshake; do not silently retry it.
+                self.connections[host] = None
+                address = self.resolve(host)
+                self.connections[host] = self.open_session(host, address, expected)
+            connection = self.connections[host]
+            require(connection is not None, "session failed; no automatic reconnect")
+            return connection.request(route, payload)
+        except Exception as exc:
+            connection = self.connections.get(host)
+            if connection is not None:
+                connection.close()
+            self.connections[host] = None
+            raise Stop(
+                "authenticated gRPC failed; outcome may be unknown; no automatic reconnect"
+            ) from exc
+
+    def close(self):
+        for host, connection in self.connections.items():
+            if connection is not None:
+                connection.close()
+            self.connections[host] = None
 
     def etcd(self, host, *args, input_text=None):
         if args == ("member", "list"):
-            return self.request(host, "/v3/cluster/member/list", {})
+            return self.request(host, "/v3/cluster/member/list", {"linearizable": True})
         if args[:2] == ("member", "update"):
             return self.request(
                 host,
                 "/v3/cluster/member/update",
-                {"ID": str(int(args[2], 16)), "peerURLs": [args[3].removeprefix("--peer-urls=")]},
+                {
+                    "ID": str(int(args[2], 16)),
+                    "peerURLs": args[3].removeprefix("--peer-urls=").split(","),
+                },
             )
         if args == ("endpoint", "status"):
             return [{"Status": self.request(host, "/v3/maintenance/status", {})}]
@@ -220,8 +271,11 @@ class Backend:
                 {"key": encode(KEY + "/health"), "serializable": False, "count_only": True},
             )
             return [{"health": True}]
-        if args == ("get", KEY):
-            return self.request(host, "/v3/kv/range", {"key": encode(KEY), "serializable": False})
+        keys = {KEY} | {KEY + "/enrollment/" + m["id"] for m in self.e["members"]}
+        if len(args) == 2 and args[0] == "get" and args[1] in keys:
+            return self.request(
+                host, "/v3/kv/range", {"key": encode(args[1]), "serializable": False}
+            )
         require(args == ("txn",), "unsupported recovery operation")
         return self.request(host, "/v3/kv/txn", json.loads(input_text))
 
@@ -264,6 +318,8 @@ class Backend:
             "--disable-etcd",
             "--disable-agent",
         }
+        if e["schema_version"] == 2:
+            forbidden.add("--resolv-conf")
         require(
             not any(arg.split("=", 1)[0] in forbidden for arg in arguments),
             "unsupported K3s CLI override/reset",
@@ -284,11 +340,13 @@ class Backend:
             if line.startswith("DropInPaths="):
                 paths = line.split("=", 1)[1].split()
                 require(
-                    set(paths) <= {str(HOOK), NETWORK_HOOK},
+                    set(paths)
+                    <= {str(HOOK), NETWORK_HOOK}
+                    | ({DNS_HOOK} if e["schema_version"] == 2 else set()),
                     "custom drop-ins require operator migration",
                 )
                 line = "DropInPaths=" + " ".join(
-                    p for p in paths if p not in (str(HOOK), NETWORK_HOOK)
+                    p for p in paths if p not in (str(HOOK), NETWORK_HOOK, DNS_HOOK)
                 )
             static.append(line)
         effective = "\n".join(sorted(static) + ["argv=" + command[1]])
@@ -325,6 +383,7 @@ class Backend:
             str(p)
             for p in Path("/etc/rancher/k3s/config.yaml.d").glob("*.yaml")
             if p.name != "20-sugarkube-network.yaml"
+            and not (e["schema_version"] == 2 and p.name == "21-sugarkube-resolver.yaml")
         )
         config_files = list(fragments)
         base = Path("/etc/rancher/k3s/config.yaml")
@@ -349,6 +408,10 @@ class Backend:
                 NETWORK_HOOK,
             ]
         )
+        if e["schema_version"] == 2 and not self.preparing:
+            dns = sibling("ethernet_mdns_resolver")
+            required.update(str(path) for path in dns.service_files(e))
+            required.add("/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt")
         files = {}
         for filename in required:
             path = Path(filename)
@@ -455,6 +518,139 @@ class Backend:
             all(inventory[key] == self.e[key] for key in inventory),
             "enrolled machine, configuration or trust material changed",
         )
+        if self.e["schema_version"] == 2:
+            require(
+                self.local_database() == self.e["local_database"], "local database identity changed"
+            )
+            if not self.preparing:
+                self.resolver_ready()
+
+    def local_database(self):
+        root = Path("/var/lib/rancher/k3s/server/db")
+        member = root / "etcd/member"
+        name = root / "etcd/name"
+        for path in (member, member / "wal", member / "snap/db", name):
+            trusted_file(path)
+        for path in (member / "wal").glob("*.wal"):
+            trusted_file(path)
+        require(not (root / "reset-flag").exists(), "reset state requires operator investigation")
+        require(
+            member.is_dir() and (member / "snap/db").stat().st_size > 0,
+            "initialized existing database required",
+        )
+        local = next(m for m in self.e["members"] if m["id"] == self.e["local_member_id"])
+        require(name.read_text() == local["name"], "persisted member name changed")
+        identity = sibling("ethernet_wal_identity").identity(member / "wal")
+        require(
+            identity == {"member_id": local["id"], "cluster_id": self.e["cluster_id"]},
+            "persisted WAL identity differs from enrollment",
+        )
+        info = member.stat()
+        return {
+            **identity,
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "name_sha256": digest(name.read_bytes()),
+        }
+
+    def resolver_ready(self):
+        dns = sibling("ethernet_mdns_resolver")
+        for path, content in dns.service_files(self.e).items():
+            trusted_file(path)
+            require(path.read_bytes() == content, "scoped resolver installation changed")
+        state = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "sugarkube-ethernet-dns.service",
+                "--property=ActiveState,NeedDaemonReload,DropInPaths,ExecStart,MainPID",
+            ]
+        )
+        dns_state = dict(line.split("=", 1) for line in state.splitlines() if "=" in line)
+        dns_command = f"/usr/bin/python3 -I {dns.RUNTIME} --enrollment {dns.CONFIG}"
+        dns_pid = dns_state.get("MainPID", "0")
+        require(
+            dns_state.get("ActiveState") == "active"
+            and dns_state.get("NeedDaemonReload") == "no"
+            and not dns_state.get("DropInPaths")
+            and dns_pid.isdigit()
+            and int(dns_pid) > 0
+            and re.findall(
+                r"argv\[\]=(.*?) ; ignore_errors=(yes|no) ;", dns_state.get("ExecStart", "")
+            )
+            == [(dns_command, "no")],
+            "scoped resolver not ready or loaded command changed",
+        )
+        unit = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "k3s.service",
+                "--property=NeedDaemonReload,DropInPaths,BindReadOnlyPaths,MainPID",
+            ]
+        )
+        properties = dict(line.split("=", 1) for line in unit.splitlines() if "=" in line)
+        binding = f"{dns.STATE}/process-resolv.conf:/etc/resolv.conf"
+        bindings = properties.get("BindReadOnlyPaths", "").split()
+        require(
+            properties.get("NeedDaemonReload") == "no"
+            and DNS_HOOK in properties.get("DropInPaths", "").split()
+            and bindings in ([binding], [binding + ":rbind"]),
+            "K3s scoped resolver hook is not loaded exactly",
+        )
+        for filename in ("upstream-resolv.conf", "process-resolv.conf", "kubelet-resolv.conf"):
+            trusted_file(dns.STATE / filename)
+        _, expected = dns.resolver_text((dns.STATE / "upstream-resolv.conf").read_text())
+        require(
+            (dns.STATE / "process-resolv.conf").read_text() == expected,
+            "resolver process view differs from host search/options",
+        )
+        require(
+            (dns.STATE / "kubelet-resolv.conf").read_text()
+            == dns.pod_resolver_text(
+                Path(f"/proc/{dns_pid}/root{self.e['pod_resolv_source']}").read_text()
+            ),
+            "kubelet resolver differs from enrolled original source",
+        )
+        pid = properties.get("MainPID", "0")
+        require(pid.isdigit(), "invalid K3s process identity")
+        if int(pid):
+            require(
+                Path(f"/proc/{pid}/root/etc/resolv.conf").read_text() == expected,
+                "running K3s resolver view drifted; explicit restart required",
+            )
+
+    def peer_tls(self, host):
+        """Healthy-time check of both peer hostname SAN and source-SAN acceptance."""
+        base = Path("/var/lib/rancher/k3s/server/tls/etcd")
+        context = ssl.create_default_context(cafile=str(base / "peer-ca.crt"))
+        context.load_cert_chain(
+            str(base / "peer-server-client.crt"), str(base / "peer-server-client.key")
+        )
+        connection = http.client.HTTPConnection(host, 2380, timeout=5)
+        raw = self.connect_peer(self.resolve(host), port=2380)
+        try:
+            connection.sock = context.wrap_socket(raw, server_hostname=host)
+            names = {
+                value
+                for kind, value in connection.sock.getpeercert().get("subjectAltName", [])
+                if kind == "DNS"
+            }
+            enrolled = {m["hostname"] for m in self.e["members"]}
+            require(
+                names & enrolled == {host} and "*.local" not in names,
+                "peer hostname SAN is not specific to the enrolled member",
+            )
+            connection.request("GET", "/members")
+            response = connection.getresponse()
+            data = response.read(1024 * 1024 + 1)
+            require(
+                response.status == 200 and len(data) <= 1024 * 1024,
+                "peer source-SAN authentication failed",
+            )
+        finally:
+            raw.close()
+            connection.close()
 
     def network(self, ip):
         path = Path("/etc/rancher/k3s/config.yaml.d/20-sugarkube-network.yaml")
@@ -482,6 +678,19 @@ class Backend:
 
     def active(self):
         return self.command(["/usr/bin/systemctl", "is-active", "k3s.service"]).strip() == "active"
+
+    def transport_running(self):
+        output = self.command(
+            ["/usr/bin/systemctl", "show", "k3s.service", "--property=ActiveState,MainPID"]
+        )
+        values = dict(line.split("=", 1) for line in output.splitlines())
+        return values["ActiveState"] in ("active", "activating") and int(values["MainPID"]) > 0
+
+    def stable_address(self, expected):
+        for index in range(3):
+            require(self.address() == expected, "Ethernet address is not stable")
+            if index < 2:
+                time.sleep(15)
 
     def running(self):
         output = self.command(
@@ -547,12 +756,19 @@ class Backend:
         return str(ip)
 
     def resolve(self, host):
+        if self.e["schema_version"] == 2 and not self.preparing:
+            require(host in {m["hostname"] for m in self.e["members"]}, "unenrolled resolver name")
+            ip = sibling("ethernet_mdns_resolver").query_stub(host)
+            if host in self.locators:
+                require(self.locators[host] == ip, "address changed during recovery")
+            self.locators[host] = ip
+            return ip
         rows = self.command(["/usr/bin/avahi-resolve-host-name", "-4", host]).splitlines()
         require(len(rows) == 1, "ambiguous mDNS result")
         fields = rows[0].split()
         require(len(fields) == 2 and fields[0].lower() == host, "mDNS name mismatch")
         ip = str(ipaddress.IPv4Address(fields[1]))
-        # etcdctl resolves the authenticated DNS name through NSS; corroborate its locator.
+        # Corroborate the locator through NSS before pinning the numeric TCP destination.
         rows = self.command(["/usr/bin/getent", "ahostsv4", host]).splitlines()
         addresses = {line.split()[0] for line in rows}
         require(addresses == {ip}, "mDNS and NSS disagree")
@@ -579,6 +795,70 @@ class Backend:
             )
         )
 
+    def workloads(self, host):
+        base = [
+            "/usr/local/bin/kubectl",
+            f"--kubeconfig={self.e['kubeconfig']}",
+            f"--server=https://{self.resolve(host)}:6443",
+            f"--tls-server-name={host}",
+            "--request-timeout=5s",
+            "get",
+        ]
+        items = json.loads(
+            self.command(
+                base
+                + [
+                    "deployments.apps,statefulsets.apps,daemonsets.apps,pods",
+                    "--all-namespaces",
+                    "-o",
+                    "json",
+                ]
+            )
+        )["items"]
+        for item in items:
+            status, kind = item.get("status", {}), item["kind"]
+            if kind == "Pod":
+                require(
+                    status.get("phase") == "Succeeded"
+                    or (
+                        status.get("phase") == "Running"
+                        and any(
+                            c.get("type") == "Ready" and c.get("status") == "True"
+                            for c in status.get("conditions", [])
+                        )
+                    ),
+                    "workload Pod completion pending",
+                )
+                continue
+            require(
+                status.get("observedGeneration", 0) >= item["metadata"]["generation"],
+                "workload controller has not observed desired state",
+            )
+            if kind == "DaemonSet":
+                desired = status.get("desiredNumberScheduled", 0)
+                require(
+                    status.get("numberReady", 0) == desired
+                    and status.get("numberUnavailable", 0) == 0,
+                    "DaemonSet completion pending",
+                )
+            else:
+                desired = item["spec"].get("replicas", 1)
+                require(status.get("readyReplicas", 0) == desired, "workload replicas not Ready")
+        for value in self.e["completion_https_urls"]:
+            url = urlsplit(value)
+            connection = http.client.HTTPSConnection(
+                url.hostname, url.port or 443, timeout=5, context=ssl.create_default_context()
+            )
+            try:
+                connection.request("GET", url.path or "/")
+                response = connection.getresponse()
+                require(
+                    response.status == 200 and len(response.read(1024 * 1024 + 1)) <= 1024 * 1024,
+                    "application HTTPS completion pending",
+                )
+            finally:
+                connection.close()
+
 
 class Recovery:
     def __init__(self, enrollment, backend, journal):
@@ -602,10 +882,45 @@ class Recovery:
                 entry["name"] == member["name"] and not entry.get("isLearner", False),
                 "member name or voter role changed",
             )
-            require(len(entry["peerURLs"]) == 1, "one peer URL per voter required")
+            if self.e["schema_version"] == 1:
+                require(len(entry["peerURLs"]) == 1, "one peer URL per voter required")
+            else:
+                urls = entry["peerURLs"]
+                numeric = urlsplit(urls[0]).hostname if urls else None
+                try:
+                    address = ipaddress.IPv4Address(numeric)
+                except (ValueError, TypeError) as exc:
+                    raise Stop("canonical numeric peer URL required") from exc
+                require(
+                    not (
+                        address.is_loopback
+                        or address.is_unspecified
+                        or address.is_multicast
+                        or address.is_link_local
+                    ),
+                    "invalid peer address",
+                )
+                expected = dual_urls(member, str(address))
+                allowed = [expected]
+                if (
+                    getattr(self.b, "enrolling", False) or getattr(self, "allow_single", False)
+                ) and not self.e.get("armed", False):
+                    allowed.append(expected[:1])
+                require(
+                    urls in allowed, "only canonical numeric and enrolled hostname URLs allowed"
+                )
+                # Client URLs are automatically republished by etcd during startup.
+                # They are never our locators or MemberUpdate inputs. Snapshot the
+                # identity/role/peer-URL state protected by this controller.
+                actual[member["id"]] = {
+                    "ID": str(entry["ID"]),
+                    "name": entry["name"],
+                    "isLearner": False,
+                    "peerURLs": list(urls),
+                }
         return actual
 
-    def prove(self, include_local=False):
+    def prove_etcd(self, include_local=False):
         self.b.config()
         ip = self.b.address()
         require(self.b.resolve(self.local["hostname"]) == ip, "local mDNS/Ethernet mismatch")
@@ -629,7 +944,10 @@ class Recovery:
                 len(health) == 1 and health[0].get("health") is True,
                 "two healthy surviving voters are required; no reset is permitted",
             )
-        members = self.membership()
+        return ip, self.membership()
+
+    def prove(self, include_local=False):
+        ip, members = self.prove_etcd(include_local)
         node = self.b.node(self.host, self.local["hostname"].removesuffix(".local"))
         require(node["metadata"]["uid"] == self.local["node_uid"], "Node identity changed")
         require(
@@ -838,6 +1156,387 @@ class Recovery:
         return "complete"
 
 
+class DualRecovery(Recovery):
+    """Version 2: restore original transport, then reconcile one original member.
+
+    Global ownership protects only membership. Node/workload completion remains a
+    local pending journal, so one stale API cannot prevent the other two repairs.
+    """
+
+    def __init__(self, enrollment, backend, journal):
+        super().__init__(enrollment, backend, journal)
+        self.host = self.local["hostname"]
+        self.allow_single = False
+
+    def save(self, incident, phase):
+        incident["phase"] = phase
+        atomic_json(self.path, incident)
+
+    def marker(self, member):
+        roster = sorted(self.e["members"], key=lambda entry: entry["id"])
+        return json.dumps(
+            {
+                "schema_version": 2,
+                "cluster_id": self.e["cluster_id"],
+                "member_id": member["id"],
+                "node_uid": member["node_uid"],
+                "hostname": member["hostname"],
+                "k3s_version": self.e["k3s_version"],
+                "roster_sha256": digest(json.dumps(roster, sort_keys=True).encode()),
+            },
+            sort_keys=True,
+        )
+
+    def read_marker(self, member):
+        values = self.b.etcd(self.host, "get", KEY + "/enrollment/" + member["id"]).get("kvs", [])
+        require(len(values) <= 1, "ambiguous enrollment marker")
+        return base64.b64decode(values[0]["value"]).decode() if values else None
+
+    def finish_enrollment(self, incident, *, resume=False):
+        self.allow_single = True
+        members = self.prove_transport(incident)
+        require(
+            members[self.local["id"]]["peerURLs"] == dual_urls(self.local, incident["ip"]),
+            "dual peer enrollment is not confirmed",
+        )
+        self.healthy_nodes()
+        if incident["phase"] == "enrollment-marker-intent":
+            require(
+                resume and self.read_marker(self.local) == self.marker(self.local),
+                "enrollment marker outcome unknown; no replay permitted",
+            )
+        else:
+            require(incident["phase"] == "completion-pending", "unfinished enrollment")
+            key, value = KEY + "/enrollment/" + self.local["id"], self.marker(self.local)
+            self.save(incident, "enrollment-marker-intent")
+            payload = {
+                "compare": [
+                    {"key": encode(key), "target": "VERSION", "result": "EQUAL", "version": "0"}
+                ],
+                "success": [{"request_put": {"key": encode(key), "value": encode(value)}}],
+                "failure": [],
+            }
+            result = self.b.etcd(self.host, "txn", input_text=json.dumps(payload))
+            require(type(result.get("succeeded")) is bool, "enrollment marker outcome unknown")
+            require(self.read_marker(self.local) == value, "conflicting enrollment marker")
+        self.save(incident, "complete")
+        return "peer-enrolled"
+
+    def enroll_peer(self, *, resume=False):
+        require(self.e.get("armed") is not True, "already armed; enrollment cannot mutate again")
+        self.allow_single = True
+        ip, members = self.prove_etcd(include_local=True)
+        require(ip == self.e["local_ipv4"], "address changed during healthy-time enrollment")
+        self.healthy_nodes()
+        for member in self.e["members"]:
+            address = self.b.resolve(member["hostname"])
+            require(
+                members[member["id"]]["peerURLs"]
+                in (dual_urls(member, address), dual_urls(member, address)[:1]),
+                "healthy-time enrollment requires current numeric URLs",
+            )
+            self.b.peer_tls(member["hostname"])
+        incident = self.previous()
+        if incident is None:
+            incident = {
+                "token": uuid.uuid4().hex,
+                "phase": "transport-pending",
+                "kind": "enrollment",
+                "transport": "not-needed",
+                "ip": ip,
+                "member_id": self.local["id"],
+                "cluster_id": self.e["cluster_id"],
+                "mutation_dispatched": False,
+                "old_peer_urls": members[self.local["id"]]["peerURLs"],
+            }
+            atomic_json(self.path, incident)
+        require(
+            incident["kind"] == "enrollment", "existing recovery journal requires reconciliation"
+        )
+        if incident["phase"] == "complete":
+            require(
+                members[self.local["id"]]["peerURLs"] == dual_urls(self.local, ip)
+                and self.read_marker(self.local) == self.marker(self.local),
+                "enrollment drifted",
+            )
+            return "peer-enrolled"
+        if incident["phase"] in ("transport-pending", "waiting-for-lock"):
+            outcome = self.reconcile(incident)
+            if outcome == "waiting-for-lock":
+                return outcome
+        elif incident["phase"] not in ("completion-pending", "enrollment-marker-intent"):
+            require(resume, "unknown enrollment outcome remains latched; explicit resume required")
+            self.resume()
+        return self.finish_enrollment(self.previous(), resume=resume)
+
+    def arm(self):
+        require(self.e.get("dual_enrolled") is True, "local peer enrollment incomplete")
+        incident = self.previous()
+        require(incident and incident["phase"] == "complete", "pending enrollment/recovery journal")
+        ip, members = self.prove_etcd(include_local=True)
+        require(ip == self.e["local_ipv4"], "address changed before arming")
+        self.healthy_nodes()
+        for member in self.e["members"]:
+            require(
+                members[member["id"]]["peerURLs"]
+                == dual_urls(member, self.b.resolve(member["hostname"])),
+                "all three dual peer enrollments must be current before arming",
+            )
+            require(
+                self.read_marker(member) == self.marker(member),
+                "missing/conflicting peer enrollment marker",
+            )
+            self.b.peer_tls(member["hostname"])
+        return "armed"
+
+    def local_guard(self):
+        self.b.config()
+        ip = self.b.address()
+        require(self.b.resolve(self.local["hostname"]) == ip, "local mDNS/Ethernet mismatch")
+        self.b.network(ip)
+        return ip
+
+    def pre_start(self, watch=False):
+        previous = self.previous()
+        baseline = (
+            previous["ip"] if previous and previous["phase"] == "complete" else self.e["local_ipv4"]
+        )
+        self.b.config()
+        ip = self.b.address()
+        if previous and previous["phase"] != "complete":
+            if not watch and previous.get("transport") == "restart-requested":
+                require(ip == previous["ip"], "pending transport address changed")
+                self.local_guard()
+                previous["transport"] = "start-authorized"
+                atomic_json(self.path, previous)
+                return "one-start-authorized"
+            raise Stop("unfinished transport authorization; explicit reconciliation required")
+        if ip == baseline:
+            if not watch:
+                self.b.network(ip)
+            return "unchanged"
+        require(self.e.get("armed") is True, "all-member recovery is not armed")
+        if watch:
+            require(self.b.transport_running(), "existing K3s process required for rebind")
+            observation = self.path.parent / "observation.json"
+            now = time.time()
+            observed = json.loads(observation.read_text()) if observation.exists() else {}
+            if observed.get("ip") != ip or not 30 <= now - observed.get("time", now) <= 300:
+                if observed.get("ip") != ip or not 0 <= now - observed.get("time", now) < 30:
+                    atomic_json(observation, {"ip": ip, "time": now})
+                return "observing"
+            self.b.refresh()
+        else:
+            self.b.stable_address(ip)
+        require(self.local_guard() == ip, "local address changed before transport start")
+        incident = {
+            "token": uuid.uuid4().hex,
+            "phase": "transport-pending",
+            "kind": "recovery",
+            "transport": "restart-requested" if watch else "start-authorized",
+            "ip": ip,
+            "member_id": self.local["id"],
+            "cluster_id": self.e["cluster_id"],
+            "old_peer_urls": dual_urls(self.local, baseline),
+            "mutation_dispatched": False,
+        }
+        atomic_json(self.path, incident)
+        return "restart-requested" if watch else "one-start-authorized"
+
+    def prove_transport(self, incident):
+        ip, members = self.prove_etcd(include_local=True)
+        require(ip == incident["ip"], "incident address changed")
+        addresses = {self.b.resolve(member["hostname"]) for member in self.e["members"]}
+        require(len(addresses) == 3, "duplicate discovered member addresses")
+        return members
+
+    def healthy_nodes(self):
+        for member in self.e["members"]:
+            ip = self.b.resolve(member["hostname"])
+            node = self.b.node(member["hostname"], member["hostname"].removesuffix(".local"))
+            require(
+                node["metadata"]["uid"] == member["node_uid"]
+                and node["metadata"]["annotations"].get("etcd.k3s.cattle.io/node-name")
+                == member["name"],
+                "Node/member identity changed",
+            )
+            require(
+                node["metadata"]["annotations"].get("k3s.io/internal-ip") == ip
+                and [a["address"] for a in node["status"]["addresses"] if a["type"] == "InternalIP"]
+                == [ip]
+                and any(
+                    c.get("type") == "Ready" and c.get("status") == "True"
+                    for c in node["status"].get("conditions", [])
+                ),
+                "Node address/Ready completion pending",
+            )
+
+    def verify_intent(self, incident, members):
+        expected = incident["before_members"]
+        require(
+            members[self.local["id"]]["peerURLs"] == incident["desired_peer_urls"],
+            "membership outcome not confirmed; no replay permitted",
+        )
+        require(
+            all(members[m["id"]] == expected[m["id"]] for m in self.survivors),
+            "other membership changed during owned update",
+        )
+
+    def release_membership(self, incident):
+        self.owned(incident["token"])
+        self.save(incident, "release-intent")
+        result = self.transaction(incident["token"], release=True)
+        require(result.get("succeeded") is True, "membership lock release not confirmed")
+        self.save(incident, "completion-pending")
+        return "completion-pending"
+
+    def reconcile(self, incident, *, owned=False):
+        require(
+            incident["phase"] in ("transport-pending", "waiting-for-lock", "lock-owned"),
+            "unknown outcome remains latched; explicit resume required",
+        )
+        require(not incident["mutation_dispatched"], "mutation cannot be replayed")
+        members = self.prove_transport(incident)  # No Kubernetes API call here.
+        require(
+            members[self.local["id"]]["peerURLs"] == incident["old_peer_urls"],
+            "membership changed outside this incident",
+        )
+        if not owned:
+            self.save(incident, "lock-acquire-intent")
+            result = self.transaction(incident["token"])
+            if result.get("succeeded") is False:
+                # Authenticated, definitive compare failure: no update was dispatched.
+                self.save(incident, "waiting-for-lock")
+                return "waiting-for-lock"
+            require(result.get("succeeded") is True, "lock acquisition outcome unknown")
+            self.save(incident, "lock-owned")
+        self.owned(incident["token"])
+        fresh = self.prove_transport(incident)
+        if fresh != members:
+            # Another original owner may have completed between our snapshot and
+            # successful acquisition. Accept only its canonical, current locator;
+            # identity/role/hostname and all-three health were re-proven above.
+            require(
+                fresh[self.local["id"]] == members[self.local["id"]],
+                "local membership changed while reserving",
+            )
+            for member in self.survivors:
+                if fresh[member["id"]] != members[member["id"]]:
+                    require(
+                        fresh[member["id"]]["peerURLs"]
+                        == dual_urls(member, self.b.resolve(member["hostname"])),
+                        "unexpected peer membership change while reserving",
+                    )
+            require(self.b.address() == incident["ip"], "address changed while reserving")
+            self.owned(incident["token"])
+            # No MemberUpdate intent or dispatch exists. Release only this exact
+            # ownership, once, then re-prove on a later watcher invocation.
+            # A false/unknown release stays in its own latched phase; neither
+            # watcher nor resume can confuse it with post-mutation completion.
+            self.save(incident, "pre-mutation-release-intent")
+            result = self.transaction(incident["token"], release=True)
+            require(result.get("succeeded") is True, "pre-mutation lock release not confirmed")
+            self.save(incident, "waiting-for-lock")
+            return "waiting-for-lock"
+        incident["before_members"] = fresh
+        incident["desired_peer_urls"] = dual_urls(self.local, incident["ip"])
+        incident["mutation_dispatched"] = True  # Conservative intent, before dispatch.
+        self.save(incident, "membership-intent")
+        self.b.etcd(
+            self.host,
+            "member",
+            "update",
+            format(int(self.local["id"]), "x"),
+            "--peer-urls=" + ",".join(incident["desired_peer_urls"]),
+        )
+        confirmed = self.membership()
+        self.verify_intent(incident, confirmed)
+        require(self.b.address() == incident["ip"], "address changed after membership update")
+        self.save(incident, "membership-verified")
+        return self.release_membership(incident)
+
+    def watch(self):
+        incident = self.previous()
+        if not incident or incident["phase"] == "complete":
+            return self.pre_start(watch=True)
+        require(incident.get("transport") != "restart-requested", "transport restart not consumed")
+        if incident["phase"] in ("transport-pending", "waiting-for-lock"):
+            return self.reconcile(incident)
+        if incident["phase"] in ("completion-pending", "verifying"):
+            return self.post_start()
+        raise Stop("unknown outcome remains latched; explicit resume required")
+
+    def resume_transport(self):
+        """Explicit one-start authorization; retain any unknown membership intent."""
+        incident = self.previous()
+        require(incident and incident["phase"] != "complete", "no pending incident")
+        require(self.local_guard() == incident["ip"], "pending address changed")
+        self.b.stable_address(incident["ip"])
+        incident["transport"] = "restart-requested"
+        incident["operator_transport_resumes"] = incident.get("operator_transport_resumes", 0) + 1
+        atomic_json(self.path, incident)
+        return "operator-restart-requested"
+
+    def resume(self):
+        incident = self.previous()
+        require(incident and incident["phase"] != "complete", "no pending incident")
+        members = self.prove_transport(incident)
+        if incident["phase"] in ("lock-acquire-intent", "lock-owned"):
+            require(not incident["mutation_dispatched"], "mutation outcome is unknown")
+            self.owned(incident["token"])
+            self.save(incident, "lock-owned")
+            return self.reconcile(incident, owned=True)
+        if incident["phase"] in ("membership-intent", "membership-verified"):
+            self.owned(incident["token"])
+            self.verify_intent(incident, members)
+            self.save(incident, "membership-verified")
+            return self.release_membership(incident)
+        if incident["phase"] == "release-intent":
+            require(
+                members[self.local["id"]]["peerURLs"] == incident["desired_peer_urls"],
+                "local membership changed after release intent",
+            )
+            values = self.b.etcd(self.host, "get", KEY).get("kvs", [])
+            require(not values, "unknown release remains latched; no lock takeover or replay")
+            self.save(incident, "completion-pending")
+            return "completion-pending"
+        if incident["phase"] in ("completion-pending", "verifying"):
+            if incident["phase"] == "verifying":
+                self.save(incident, "completion-pending")
+            return self.post_start()
+        raise Stop("use watcher for confirmed waiting or resume-transport for stopped original DB")
+
+    def post_start(self):
+        incident = self.previous()
+        if not incident or incident["phase"] == "complete":
+            return "unchanged"
+        if incident["phase"] in ("transport-pending", "waiting-for-lock"):
+            return self.reconcile(incident)
+        require(
+            incident["phase"] in ("completion-pending", "verifying"),
+            "unknown outcome remains latched; explicit resume required",
+        )
+        members = self.prove_transport(incident)
+        require(
+            members[self.local["id"]]["peerURLs"] == dual_urls(self.local, incident["ip"]),
+            "local membership drifted before completion",
+        )
+        self.healthy_nodes()  # API and Node gates only AFTER membership lock release.
+        self.b.workloads(self.host)
+        running, now = self.b.running(), time.monotonic()
+        if incident["phase"] == "completion-pending":
+            incident.update(running=running, verified_at_monotonic=now)
+            self.save(incident, "verifying")
+            return "verifying"
+        require(running == incident["running"], "K3s restarted during completion")
+        elapsed = now - incident["verified_at_monotonic"]
+        require(elapsed >= 0, "completion clock changed")
+        if elapsed < 30:
+            return "verifying"
+        self.save(incident, "complete")
+        return "complete"
+
+
 def trusted_file(path):
     info = path.lstat()
     require(
@@ -879,9 +1578,61 @@ def enroll(request, destination):
     trusted_file(request)
     e = json.loads(request.read_text())
     backend = Backend(e)
+    try:
+        return enroll_checked(e, destination, backend)
+    finally:
+        backend.close()
+
+
+def prepare_resolver(request):
+    """Healthy-time, inactive resolver installation; never change certificates."""
+    trusted_file(request)
+    e = json.loads(request.read_text())
+    require(e["schema_version"] == 2, "explicit version 2 request required")
+    backend = Backend(e)
+    backend.enrolling = backend.preparing = True
+    try:
+        e.update(backend.inventory())
+        e["local_ipv4"] = backend.address()
+        e["local_database"] = backend.local_database()
+        validate_enrollment(e)
+        Recovery(e, backend, Path("/unused-prepare-journal")).prove(include_local=True)
+        dns = sibling("ethernet_mdns_resolver")
+        e["pod_resolv_source"] = str(dns.select_pod_source())
+        files = dns.service_files(e)
+        for path in files:
+            require(
+                not path.exists() and not path.is_symlink(),
+                "existing resolver preparation requires reconciliation",
+            )
+            install_directory(path.parent)
+        hook = files.pop(dns.HOOK)
+        for path, content in files.items():
+            atomic_write(path, content)
+            path.chmod(0o644)
+        atomic_write(dns.HOOK, hook)
+        dns.HOOK.chmod(0o644)
+        return (
+            "resolver prepared inactive; owner must activate and qualify "
+            "one healthy server at a time"
+        )
+    finally:
+        backend.close()
+
+
+def enroll_checked(e, destination, backend):
+    """Keep every authenticated session bounded to this enrollment invocation."""
     backend.enrolling = True  # Read-only healthy-time proof precedes hook installation.
+    if e["schema_version"] == 2:
+        dns = sibling("ethernet_mdns_resolver")
+        trusted_file(dns.CONFIG)
+        e["pod_resolv_source"] = json.loads(dns.CONFIG.read_text())["pod_resolv_source"]
     e.update(backend.inventory())
     e["local_ipv4"] = backend.address()
+    if e["schema_version"] == 2:
+        e["armed"] = False
+        e["dual_enrolled"] = False
+        e["local_database"] = backend.local_database()
     validate_enrollment(e)
     backend.network(e["local_ipv4"])
     running = backend.running()
@@ -894,7 +1645,11 @@ def enroll(request, destination):
         require(address not in addresses, "duplicate enrolled Ethernet address")
         addresses.add(address)
         require(
-            members[member["id"]]["peerURLs"] == [f"https://{address}:2380"],
+            members[member["id"]]["peerURLs"] == [f"https://{address}:2380"]
+            or (
+                e["schema_version"] == 2
+                and members[member["id"]]["peerURLs"] == dual_urls(member, address)
+            ),
             "enrollment requires converged peer URLs",
         )
         node = backend.node(member["hostname"], member["hostname"].removesuffix(".local"))
@@ -910,6 +1665,15 @@ def enroll(request, destination):
             == [address],
             "enrollment requires converged Node addresses",
         )
+        if e["schema_version"] == 2:
+            require(
+                any(
+                    c.get("type") == "Ready" and c.get("status") == "True"
+                    for c in node["status"].get("conditions", [])
+                ),
+                "enrollment requires Ready Nodes",
+            )
+            backend.peer_tls(member["hostname"])
     require(
         ip == e["local_ipv4"] and backend.inventory() == {k: e[k] for k in backend.inventory()},
         "enrollment inputs changed",
@@ -919,6 +1683,8 @@ def enroll(request, destination):
     enrollment_arg = f"--enrollment {ENROLLMENT}"
     files = {
         RUNTIME: Path(__file__).read_bytes(),
+        TRANSPORT: Path(__file__).with_name("ethernet_etcd_grpc.py").read_bytes(),
+        DESCRIPTOR: Path(__file__).with_name("ethernet-etcd.desc").read_bytes(),
         HOOK: recovery_hook(),
         WATCH_SERVICE: (
             "# Managed by ethernet_quorum_recover.py\n[Unit]\n"
@@ -933,6 +1699,8 @@ def enroll(request, destination):
             "Unit=sugarkube-ethernet-recovery.service\n[Install]\nWantedBy=timers.target\n"
         ).encode(),
     }
+    if e["schema_version"] == 2:
+        files[WAL_RUNTIME] = Path(__file__).with_name("ethernet_wal_identity.py").read_bytes()
     # Do all conflict checks before writing. Failed installation is never enabled.
     for path in [destination, *files]:
         require(
@@ -968,18 +1736,37 @@ def private_state(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["enroll", "pre-start", "post-start", "watch", "resume"])
+    parser.add_argument(
+        "phase",
+        choices=[
+            "enroll",
+            "prepare-resolver",
+            "enroll-peer",
+            "resume-peer-enrollment",
+            "arm",
+            "pre-start",
+            "post-start",
+            "watch",
+            "resume",
+            "resume-transport",
+        ],
+    )
     parser.add_argument("--enrollment", type=Path, default=ENROLLMENT)
     parser.add_argument("--request", type=Path)
     parser.add_argument(
         "--state-dir", type=Path, default=Path("/var/lib/sugarkube/ethernet-recovery")
     )
     args = parser.parse_args()
+    backend = None
     try:
         require(os.geteuid() == 0, "root-owned enrollment and state required")
-        if args.phase == "enroll":
+        if args.phase in ("enroll", "prepare-resolver"):
             require(args.request is not None, "explicit healthy-time enrollment request required")
-            print(enroll(args.request, args.enrollment))
+            print(
+                prepare_resolver(args.request)
+                if args.phase == "prepare-resolver"
+                else enroll(args.request, args.enrollment)
+            )
             return 0
         trusted_file(args.enrollment)
         enrollment = json.loads(args.enrollment.read_text())
@@ -987,13 +1774,32 @@ def main():
         backend = Backend(enrollment)
         with (args.state_dir / "lock").open("a") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            recovery = Recovery(enrollment, backend, args.state_dir / "incident.json")
+            recovery_class = DualRecovery if enrollment["schema_version"] == 2 else Recovery
+            recovery = recovery_class(enrollment, backend, args.state_dir / "incident.json")
+            require(
+                enrollment["schema_version"] == 2
+                or args.phase in ("pre-start", "post-start", "watch", "resume"),
+                "phase requires version 2 enrollment",
+            )
             action = {
                 "pre-start": recovery.pre_start,
                 "post-start": recovery.post_start,
                 "watch": recovery.watch,
                 "resume": recovery.resume,
+                **(
+                    {
+                        "enroll-peer": recovery.enroll_peer,
+                        "arm": recovery.arm,
+                        "resume-peer-enrollment": lambda: recovery.enroll_peer(resume=True),
+                        "resume-transport": recovery.resume_transport,
+                    }
+                    if enrollment["schema_version"] == 2
+                    else {}
+                ),
             }[args.phase]()
+            if action in ("peer-enrolled", "armed"):
+                enrollment["dual_enrolled" if action == "peer-enrolled" else "armed"] = True
+                atomic_json(args.enrollment, enrollment)
         # Release flock before queuing the systemd restart; its pre-start takes the same lock.
         if action in ("restart-requested", "operator-restart-requested"):
             backend.restart(operator=action == "operator-restart-requested")
@@ -1008,11 +1814,13 @@ def main():
         KeyError,
         TypeError,
         IndexError,
-        http.client.HTTPException,
         yaml.YAMLError,
     ):
         print("Ethernet recovery blocked; preserve the incident and obtain operator review.")
         return 2
+    finally:
+        if backend is not None:
+            backend.close()
 
 
 if __name__ == "__main__":
