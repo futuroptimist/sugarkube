@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "origin": "template",
+  "qualification": "not_qualified",
+  "artifact": {
+    "id": null,
+    "sha256": null,
+    "backup_version": null,
+    "restore_version": null
+  },
+  "backup": {
+    "id": null,
+    "kind": "scheduled_snapshot",
+    "provenance_ref": null
+  },
+  "seed": {
+    "selected": [],
+    "decision_ref": null
+  },
+  "recovery": "not_run",
+  "measurements": {
+    "recovered_through_utc": null,
+    "incident_utc": null,
+    "started_utc": null,
+    "accepted_utc": null,
+    "rpo_seconds": null,
+    "rto_seconds": null,
+    "rpo_objective_seconds": null,
+    "rto_objective_seconds": null,
+    "evidence_ref": null
+  },
+  "gates": {
+    "backup_inventory": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "backup_integrity": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "backup_complete": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "storage_independence": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "access_without_api": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "token_available": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "token_matches_backup": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "config_reviewed": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "version_supported": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "isolation": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "all_servers_stopped": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "seed_selection_approved": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "reset_approved": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "restore_completed": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "seed_objects_verified": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "peer_data_preserved": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "peer_moves_approved": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "sequential_rejoin": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "membership_voters": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "api": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "addresses_tls": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "leases_restarts": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "pod_networking": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "objects": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "pvc_data": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "application_journeys": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "acknowledged_writes": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "monitoring_reference": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "rollback_reviewed": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "operator_acceptance": {
+      "status": "not_run",
+      "evidence_ref": null
+    },
+    "data_restore_approved": {
+      "status": "not_run",
+      "evidence_ref": null
+    }
+  }
+}

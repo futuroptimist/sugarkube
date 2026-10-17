@@ -1,15 +1,19 @@
 # k3s etcd snapshots with S3 offload
 
 k3s bundles an embedded etcd cluster that can take scheduled snapshots of the control-plane state.
-By default snapshots remain on the first server's filesystem, but k3s can also upload them to an S3
+By default snapshots remain on each server's filesystem, but k3s can also upload them to an S3
 bucket for durable off-cluster backups.
 
 ## Server configuration example
 
 Place the following configuration on each server under `/etc/rancher/k3s/config.yaml`. It disables
 the bundled `servicelb` (kube-vip already provides a load balancer), enables twice-daily etcd
-snapshots, keeps four weeks of history, and pushes copies to an S3 bucket. Provide credentials via
-an IAM role attached to the node or by uncommenting the inline environment variables.
+snapshots, retains 28 local snapshots per server (about 14 days at two snapshots per day),
+and pushes copies to an S3 bucket. This is a configuration example, not measured backup coverage.
+Provide credentials through a separately reviewed protected configuration; do not publish values.
+Verify remote retention and bucket lifecycle independently for the exact installed version;
+local retention does not establish the remote recovery window. See the
+[K3s snapshot reference](https://docs.k3s.io/cli/etcd-snapshot).
 
 ```yaml
 # /etc/rancher/k3s/config.yaml
@@ -44,18 +48,13 @@ ExecStart=/bin/mkdir -p /var/lib/rancher/k3s/server/db/snapshots
 WantedBy=multi-user.target
 ```
 
-## Restore quickstart
+## Restore qualification and procedure
 
-To restore from a snapshot, copy it to the first server (or download it from S3), then start k3s in
-reset mode pointing at the snapshot path. k3s reinitializes the datastore and halts so the
-remaining servers can rejoin with their normal configuration.
+Use the canonical [snapshot restore procedure](../runbook.md#restoring-etcd-from-snapshots)
+and [qualification checklist](../runbook.md#offline-restore-qualification-record).
+That procedure requires a clean environment, exactly one isolated selected seed, preserved
+peer data, sequential rejoin, and independent acceptance gates. Ready nodes alone do not prove
+restored data. Existing-database recovery is distinct from scheduled-snapshot restoration.
 
-```bash
-sudo k3s server \
-  --cluster-init \
-  --cluster-reset \
-  --cluster-reset-restore-path /var/lib/rancher/k3s/server/db/snapshots/<snapshot>
-```
-
-After the reset completes, remove the reset flags from the config file, restart k3s on all nodes,
-and confirm `kubectl get nodes` reports each member as Ready.
+Do not execute a restore from this configuration guide. Repository checks and synthetic fixtures
+cannot qualify a live restore or close [#2919](https://github.com/futuroptimist/sugarkube/issues/2919).
