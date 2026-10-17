@@ -6,7 +6,8 @@ umask 022
 IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
 IP_CMD="${IP_CMD:-ip}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN-systemctl}"
-LOG_DIR="${SUGARKUBE_LOG_DIR:-/var/log/sugarkube}"
+# Keep strict root-trusted ancestry: Ubuntu /var/log can be group-writable.
+LOG_DIR="${SUGARKUBE_LOG_DIR:-/var/lib/sugarkube/logs}"
 LOG_FILE="${LOG_DIR}/configure_k3s_node_ip.log"
 SYSTEMD_SYSTEM_DIR="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
 UNIT_SEARCH_PATHS="${SYSTEMD_UNIT_PATHS:-/etc/systemd/system:/lib/systemd/system:/usr/lib/systemd/system}"

@@ -65,6 +65,26 @@ protection exists. A failed refresh preserves the old file but does not allow K3
 through this start path. It writes only owned network YAML; it cannot migrate legacy files,
 rewrite TLS policy or mutate membership. The installed copy does not depend on the checkout.
 
+The Ethernet helper and controller refresh now log to
+`/var/lib/sugarkube/logs/configure_k3s_node_ip.log`. Ubuntu 24.04.5 qualification found
+`/var/log` owned by UID 0, GID 102 with mode `0775`; the strict ancestor guard correctly
+refused that group-writable path. The application state path avoids that ancestor without
+changing system directory permissions or relaxing ownership, mode or symlink checks.
+`SUGARKUBE_LOG_DIR` remains an explicit helper override and must satisfy the same guards;
+there is no silent fallback for an unsafe override. Other scripts' logging is unchanged.
+
+Existing logs are retained in place, without copying, deletion or automatic migration.
+Previously installed hooks retain their explicit old argument until preparation updates them.
+On an existing server, a reviewed `--prepare-server` run installs the updated helper and
+managed hooks; load them only through a separately controlled daemon reload or reboot.
+An already enrolled recovery installation fingerprints these files, so changing them invalidates
+its enrollment and needs a separate reviewed migration. Do not delete enrollment or journals
+to bypass that check. A fresh qualification guest whose preparation failed before K3s creation
+can rerun preparation from the fixed revision, without a database reset. This fix is covered
+by synthetic root filesystem tests; Ubuntu guest retesting and broader platform support
+remain unproven until recorded. See the
+[Ubuntu preparation finding](../outages/2026-10-17-ubuntu-network-log-path.json).
+
 Preparation never reloads systemd or starts/restarts a service. The K3s installer loads the
 new drop-ins on a fresh installation; an existing installation loads them after an operator
 reload or reboot. Installing/upgrading the hook on an existing server requires explicit

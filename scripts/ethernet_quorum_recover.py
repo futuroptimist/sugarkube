@@ -671,7 +671,7 @@ class Backend:
                 "--refresh-on-start",
                 self.e["interface"],
                 "/etc/rancher/k3s",
-                "/var/log/sugarkube",
+                "/var/lib/sugarkube/logs",
                 "/usr/sbin/ip",
             ]
         )

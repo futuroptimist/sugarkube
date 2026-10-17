@@ -579,3 +579,85 @@ def test_just_up_preparation_failure_prevents_installation(
     assert "K3s installation blocked" in result.stderr
     assert not sentinel.exists()
     assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
+
+
+def default_log_directory(env):
+    clean = {key: value for key, value in env.items() if key != "SUGARKUBE_LOG_DIR"}
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; printf "%s" "$LOG_DIR"', "bash", str(SCRIPT)],
+        env=clean,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def test_application_log_path_avoids_ubuntu_var_log_and_survives_boot(
+    setup, tmp_path, trusted_network_test_ancestry
+):
+    env, units, config, sample = setup
+    env["PYTHONPATH"] = trusted_network_test_ancestry(synthetic_root=True)
+    default = default_log_directory(env)
+    assert default == "/var/lib/sugarkube/logs"
+    # Map the selected absolute default into the synthetic root filesystem.
+    app_logs = tmp_path / default.lstrip("/")
+    var_log = tmp_path / "var/log"
+    var_log.mkdir(parents=True)
+    var_log.chmod(0o775)
+    legacy = var_log / "sugarkube/configure_k3s_node_ip.log"
+    legacy.parent.mkdir()
+    legacy.write_text("retained legacy log\n")
+    env["SUGARKUBE_LOG_DIR"] = str(app_logs)
+    assert run(setup).returncode == 0
+    for unit in ("k3s.service", "k3s-agent.service"):
+        hook = units / f"{unit}.d/20-sugarkube-network.conf"
+        assert str(app_logs) in hook.read_text()
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    result, loaded = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode == 0, result.stderr
+    assert 'node-ip: "192.168.50.99"' in loaded
+    assert "Ethernet address refreshed" in (app_logs / "configure_k3s_node_ip.log").read_text()
+    assert legacy.read_text() == "retained legacy log\n"
+    assert var_log.stat().st_mode & 0o777 == 0o775
+    assert not (Path(env["K3S_DATA_DIR"]) / "server/db").exists()
+    assert "restart" not in Path(env["CALLS"]).read_text()
+
+
+def test_explicit_group_writable_log_ancestor_still_rejected(
+    setup, tmp_path, trusted_network_test_ancestry
+):
+    env, _, _, _ = setup
+    env["PYTHONPATH"] = trusted_network_test_ancestry(synthetic_root=True)
+    var_log = tmp_path / "var/log"
+    var_log.mkdir(parents=True)
+    var_log.chmod(0o775)
+    env["SUGARKUBE_LOG_DIR"] = str(var_log / "sugarkube")
+    result = run(setup)
+    assert result.returncode != 0
+    assert "Untrusted pre-start installation ownership or permissions" in result.stderr
+    assert var_log.stat().st_mode & 0o777 == 0o775
+    assert not (var_log / "sugarkube").exists()
+
+
+def test_existing_managed_hook_log_path_change_requires_prepare_server(setup, tmp_path):
+    env, units, config, _ = setup
+    old_logs = Path(env["SUGARKUBE_LOG_DIR"])
+    assert run(setup).returncode == 0
+    old_content = (old_logs / "configure_k3s_node_ip.log").read_bytes()
+    (units / "k3s.service").touch()
+    hook = units / "k3s.service.d/20-sugarkube-network.conf"
+    old_hook = hook.read_bytes()
+    database = Path(env["K3S_DATA_DIR"]) / "server/db/member"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"original-database")
+    new_logs = tmp_path / "var/lib/sugarkube/logs"
+    env["SUGARKUBE_LOG_DIR"] = str(new_logs)
+    assert run(setup).returncode == 2
+    assert hook.read_bytes() == old_hook
+    assert run(setup, "--prepare-server").returncode == 0
+    assert str(new_logs) in hook.read_text()
+    assert (old_logs / "configure_k3s_node_ip.log").read_bytes() == old_content
+    assert database.read_bytes() == b"original-database"
+    assert "daemon-reload" not in Path(env["CALLS"]).read_text()
+    assert "restart" not in Path(env["CALLS"]).read_text()

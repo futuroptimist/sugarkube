@@ -476,6 +476,7 @@ def test_backend_address_discovery_commands_are_bounded(enrollment, tmp_path, mo
     commands = []
     backend.command = lambda argv, **kw: commands.append(argv) or "active"
     backend.refresh()
+    assert commands[-1][-2] == "/var/lib/sugarkube/logs"
     assert backend.active()
     backend.restart()
     backend.restart(operator=True)
