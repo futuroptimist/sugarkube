@@ -1,0 +1,265 @@
+"""Fail-closed discovery and DNS preservation, independent of etcd readiness."""
+
+import importlib.util
+import ipaddress
+import socket
+import struct
+import threading
+import time
+from pathlib import Path
+
+import pytest
+from dnslib import QTYPE, RCODE, RR, A, DNSRecord
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/ethernet_mdns_resolver.py"
+SPEC = importlib.util.spec_from_file_location("recovery_dns", SCRIPT)
+DNS = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(DNS)
+ENROLLMENT = {
+    "schema_version": 2,
+    "interface": "eth0",
+    "members": [{"hostname": f"pi{i}.local"} for i in range(3)],
+}
+NETWORK = ipaddress.IPv4Network("10.0.0.0/24")
+ANCILLARY = [(socket.IPPROTO_IP, socket.IP_TTL, struct.pack("i", 255))]
+
+
+def reply(query, addresses):
+    result = query.reply()
+    for address, ttl in addresses:
+        result.add_answer(RR(query.q.qname, QTYPE.A, rdata=A(address), ttl=ttl))
+    return result.pack()
+
+
+def test_enrolled_lookup_withdrawal_and_no_cache():
+    answers = iter(["10.0.0.21", DNS.Unavailable("withdrawn"), "10.0.0.22"])
+    calls = []
+
+    def lookup(host, interface):
+        calls.append((host, interface))
+        result = next(answers)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    resolver = DNS.Resolver(ENROLLMENT, lookup=lookup)
+    query = DNSRecord.question("pi1.local").pack()
+    first = DNSRecord.parse(resolver.answer(query))
+    absent = DNSRecord.parse(resolver.answer(query))
+    third = DNSRecord.parse(resolver.answer(query))
+    assert str(first.rr[0].rdata) == "10.0.0.21" and first.rr[0].ttl == 1
+    assert absent.header.rcode == RCODE.SERVFAIL and not absent.rr
+    assert str(third.rr[0].rdata) == "10.0.0.22"
+    assert calls == [("pi1.local", "eth0")] * 3
+
+
+@pytest.mark.parametrize(
+    "name,kind,code",
+    [
+        ("foreign.local", "A", RCODE.REFUSED),
+        ("pi1.local", "AAAA", RCODE.NOERROR),
+        ("pi1.local", "TXT", RCODE.REFUSED),
+        ("local", "A", RCODE.REFUSED),
+    ],
+)
+def test_unknown_names_and_ipv6_never_discover_or_forward(name, kind, code):
+    def forbidden(*args, **kwargs):
+        pytest.fail("unexpected lookup/forward")
+
+    resolver = DNS.Resolver(ENROLLMENT, lookup=forbidden, send=forbidden)
+    answer = DNSRecord.parse(resolver.answer(DNSRecord.question(name, kind).pack()))
+    assert answer.header.rcode == code and not answer.rr
+
+
+def test_ordinary_dns_bytes_and_current_upstream_preserved(tmp_path):
+    path = tmp_path / "resolv.conf"
+    path.write_text("search example.test\nnameserver 192.0.2.1\noptions edns0 timeout:2\n")
+    calls = []
+    query = DNSRecord.question("service.example.test").pack()
+    response = DNSRecord.parse(query).reply().pack()
+
+    def send(data, upstreams, tcp):
+        calls.append((data, upstreams, tcp))
+        return response
+
+    resolver = DNS.Resolver(ENROLLMENT, upstream=path, send=send)
+    assert resolver.answer(query) == response
+    path.write_text("nameserver 127.0.0.53\n")
+    assert resolver.answer(query, tcp=True) == response
+    assert calls == [(query, ["192.0.2.1"], False), (query, ["127.0.0.53"], True)]
+
+
+def test_process_view_preserves_host_and_kubelet_dns(tmp_path):
+    source = tmp_path / "host-resolv.conf"
+    state = tmp_path / "run"
+    state.mkdir()
+    original = "# DHCP supplied\nsearch lan.example\nnameserver 192.0.2.53\noptions ndots:2\n"
+    source.write_text(original)
+    DNS.publish_config(source, state)
+    assert source.read_text() == (state / "upstream-resolv.conf").read_text() == original
+    assert (state / "process-resolv.conf").read_text() == (
+        "nameserver 127.0.0.55\n# DHCP supplied\nsearch lan.example\noptions ndots:2\n"
+    )
+    source.write_text(original.replace("192.0.2.53", "192.0.2.54"))
+    DNS.publish_config(source, state)
+    assert (state / "upstream-resolv.conf").read_text() == source.read_text()
+
+
+def test_systemd_stub_does_not_leak_loopback_into_pod_dns(tmp_path):
+    host, pod = tmp_path / "host", tmp_path / "pod"
+    host.write_text("nameserver 127.0.0.53\nsearch local.example\n")
+    pod.write_text("nameserver 10.0.0.53\nsearch local.example\n")
+    assert DNS.select_pod_source([host, pod]) == pod
+    DNS.publish_config(host, tmp_path, pod)
+    assert (tmp_path / "upstream-resolv.conf").read_text() == host.read_text()
+    assert (tmp_path / "kubelet-resolv.conf").read_text() == pod.read_text()
+    pod.unlink()
+    with pytest.raises(DNS.Unavailable, match="no existing valid"):
+        DNS.select_pod_source([host, pod])
+
+
+def test_inactive_service_uses_scoped_dns_and_separate_pod_source():
+    e = {**ENROLLMENT, "pod_resolv_source": "/run/systemd/resolve/resolv.conf"}
+    files = DNS.service_files(e)
+    assert DNS.HOST_RESOLV not in files
+    assert b"Type=notify" in files[DNS.SERVICE]
+    assert b"StartLimitBurst=3" in files[DNS.SERVICE]
+    assert (
+        b"BindReadOnlyPaths=/run/sugarkube-ethernet-dns/process-resolv.conf:/etc/resolv.conf"
+        in files[DNS.HOOK]
+    )
+    assert b"/run/sugarkube-ethernet-dns/kubelet-resolv.conf" in files[DNS.KUBELET_CONFIG]
+    with pytest.raises(DNS.Unavailable):
+        DNS.service_files({**e, "pod_resolv_source": "/some/credential/file"})
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "nameserver 127.0.0.55\n",
+        "nameserver 0.0.0.0\n",
+        "nameserver 192.0.2.1\nnameserver 192.0.2.1\n",
+    ],
+)
+def test_bad_or_recursive_upstream_fails_closed(text):
+    with pytest.raises(DNS.Unavailable):
+        DNS.resolver_text(text)
+
+
+def test_malformed_and_wrong_scope_mdns_replies():
+    query = DNSRecord.question("pi1.local")
+    good = reply(query, [("10.0.0.21", 120)])
+    args = (query, good, ANCILLARY, 0, ("10.0.0.21", 5353), NETWORK)
+    assert DNS.candidate_answers(*args) == [("10.0.0.21", 120)]
+    assert DNS.candidate_answers(query, good, [], 0, ("10.0.0.21", 5353), NETWORK) == []
+    assert (
+        DNS.candidate_answers(
+            query, good, ANCILLARY, socket.MSG_TRUNC, ("10.0.0.21", 5353), NETWORK
+        )
+        == []
+    )
+    wrong = DNSRecord.question("pi2.local")
+    assert (
+        DNS.candidate_answers(
+            query, reply(wrong, [("10.0.0.21", 120)]), ANCILLARY, 0, ("10.0.0.21", 5353), NETWORK
+        )
+        == []
+    )
+    with pytest.raises(DNS.Unavailable, match="out-of-scope"):
+        DNS.candidate_answers(
+            query, reply(query, [("192.0.2.1", 120)]), ANCILLARY, 0, ("10.0.0.21", 5353), NETWORK
+        )
+
+
+@pytest.mark.parametrize(
+    "answers,changed,allowed",
+    [
+        ([("10.0.0.21", 120)], False, True),
+        ([("10.0.0.21", 120), ("10.0.0.22", 120)], False, False),
+        ([("10.0.0.21", 120), ("10.0.0.21", 0)], False, False),
+        ([], False, False),
+        ([("10.0.0.21", 120)], True, False),
+    ],
+)
+def test_discovery_ambiguity_goodbye_and_interface_change(monkeypatch, answers, changed, allowed):
+    sent, options = [], []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def setsockopt(self, *args):
+            options.append(args)
+
+        def bind(self, address):
+            assert address == ("10.0.0.10", 0)
+
+        def sendto(self, data, target):
+            assert target == ("224.0.0.251", 5353)
+            sent.append(DNSRecord.parse(data))
+
+        def settimeout(self, timeout):
+            assert timeout > 0
+
+        def recvmsg(self, *args):
+            if answers and len(sent) == 1:
+                query = sent[0]
+                sent.append(None)
+                return reply(query, answers), ANCILLARY, 0, ("10.0.0.21", 5353)
+            raise socket.timeout()
+
+    monkeypatch.setattr(DNS.socket, "socket", lambda *args: Socket())
+    states = iter(
+        [("10.0.0.10", NETWORK, 2), ("10.0.0.11" if changed else "10.0.0.10", NETWORK, 2)]
+    )
+    if allowed:
+        assert (
+            DNS.discover("pi1.local", "eth0", state=lambda interface: next(states)) == "10.0.0.21"
+        )
+    else:
+        with pytest.raises(DNS.Unavailable):
+            DNS.discover("pi1.local", "eth0", state=lambda interface: next(states))
+    assert (socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b"eth0\0") in options
+
+
+def test_udp_tcp_service_restart_and_outage():
+    resolver = DNS.Resolver(ENROLLMENT, lookup=lambda *args: "10.0.0.21")
+    with socket.socket() as reserve:
+        reserve.bind(("127.0.0.1", 0))
+        port = reserve.getsockname()[1]
+    for _ in range(2):
+        stop = threading.Event()
+        worker = threading.Thread(
+            target=DNS.serve,
+            args=(resolver,),
+            kwargs={
+                "address": "127.0.0.1",
+                "port": port,
+                "stop": stop,
+                "refresh": lambda: None,
+            },
+        )
+        worker.start()
+        try:
+            query = DNSRecord.question("pi1.local")
+            for _ in range(30):
+                try:
+                    answer = DNSRecord.parse(query.send("127.0.0.1", port, timeout=0.1))
+                    break
+                except socket.timeout:
+                    time.sleep(0.01)
+            else:
+                pytest.fail("resolver did not start")
+            assert str(answer.rr[0].rdata) == "10.0.0.21"
+            answer = DNSRecord.parse(query.send("127.0.0.1", port, tcp=True, timeout=2))
+            assert str(answer.rr[0].rdata) == "10.0.0.21"
+        finally:
+            stop.set()
+            worker.join(timeout=3)
+        assert not worker.is_alive()
+        with pytest.raises(OSError):
+            query.send("127.0.0.1", port, tcp=True, timeout=0.1)
