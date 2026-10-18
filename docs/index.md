@@ -28,6 +28,8 @@ Review the safety notes before working with power components.
 - [mac_mini_station.md](mac_mini_station.md) — press-fit cap for the Mac mini keyboard station
 - [electronics_schematics.md](electronics_schematics.md) — KiCad and Fritzing designs
 - [pi_image_quickstart.md](pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
+- [Offline image verification and target planning](design/offline-image-verification-and-target-planning.md)
+  — proposed offline verifier and synthetic target design
 - [pi_smoke_test.md](pi_smoke_test.md) — run remote smoke tests against freshly provisioned Pis
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
   they inform
