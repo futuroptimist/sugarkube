@@ -362,3 +362,21 @@ def test_resolved_temporary_disappearing_during_enumeration_is_safe(view, monkey
     monkeypatch.setattr(Path, "lstat", vanished)
     DNS.initialize_view(e)
     DNS.check_view(e)
+
+
+def test_optional_ipc_socket_disappearing_during_enumeration_is_safe(view, monkeypatch):
+    e, host, state = view
+    endpoint = host / "io.systemd.Resolve"
+    endpoint.touch()
+    lstat = Path.lstat
+
+    def vanished(path):
+        if path == endpoint:
+            endpoint.unlink()
+            raise FileNotFoundError(path)
+        return lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", vanished)
+    DNS.initialize_view(e)
+    DNS.check_view(e)
+    assert (state / "resolved/io.systemd.Resolve").is_symlink()

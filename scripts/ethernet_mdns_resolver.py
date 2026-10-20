@@ -73,7 +73,7 @@ def resolved_layout(root=Path("/")):
         try:
             info = path.lstat()
         except FileNotFoundError:
-            if temporary:
+            if temporary or path.name in ("io.systemd.Resolve", "io.systemd.Resolve.Monitor"):
                 continue
             raise
         socket_entry = path.name.startswith("io.systemd.")

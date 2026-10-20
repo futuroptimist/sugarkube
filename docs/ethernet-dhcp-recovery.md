@@ -267,9 +267,10 @@ Observation of one answer does not prove that no unseen conflicting responder ex
 A K3s service mount gives that process the scoped resolver without changing host DNS.
 Other DNS queries retain the host's upstream servers; unknown `.local` names are refused.
 Kubelet uses a separate copy of an existing valid pod resolver source. Preparation refuses
-to invent a public DNS fallback. Search/options changes require an owner-controlled K3s
-restart; configuration checks block recovery if the running process sees a stale resolver
-view. The systemd mount and actual pod DNS behavior have not been qualified in this cloud.
+to invent a public DNS fallback. Legacy file-bind enrollments require an owner-controlled
+K3s restart for changed search/options. New directory-backed enrollments publish those changes
+through child-file replacement. Both modes block recovery on a stale or unexpected view.
+The generated systemd units and actual pod DNS behavior remain qualification gates.
 
 ### Healthy-time sequence
 
