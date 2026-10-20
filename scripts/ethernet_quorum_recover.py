@@ -585,6 +585,7 @@ class Backend:
 
     def resolver_ready(self):
         dns = sibling("ethernet_mdns_resolver")
+        directory_view = self.e.get("resolver_view") is not None
         for path, content in dns.service_files(self.e).items():
             trusted_file(path)
             require(path.read_bytes() == content, "scoped resolver installation changed")
@@ -593,10 +594,17 @@ class Backend:
                 "/usr/bin/systemctl",
                 "show",
                 "sugarkube-ethernet-dns.service",
-                "--property=ActiveState,NeedDaemonReload,DropInPaths,ExecStart,MainPID",
+                "--property=ActiveState,NeedDaemonReload,DropInPaths,ExecStart,MainPID"
+                + (",RuntimeDirectory,RuntimeDirectoryPreserve" if directory_view else ""),
             ]
         )
         dns_state = dict(line.split("=", 1) for line in state.splitlines() if "=" in line)
+        if directory_view:
+            require(
+                dns_state.get("RuntimeDirectory") == "sugarkube-ethernet-dns"
+                and dns_state.get("RuntimeDirectoryPreserve") == "yes",
+                "resolver runtime directory lifetime is not preserved",
+            )
         dns_command = f"/usr/bin/python3 -I {dns.RUNTIME} --enrollment {dns.CONFIG}"
         dns_pid = dns_state.get("MainPID", "0")
         require(
@@ -622,10 +630,18 @@ class Backend:
         properties = dict(line.split("=", 1) for line in unit.splitlines() if "=" in line)
         binding = f"{dns.STATE}/process-resolv.conf:/etc/resolv.conf"
         bindings = properties.get("BindReadOnlyPaths", "").split()
+        if directory_view:
+            expected_bindings = dns.resolver_bindings(self.e)
+            binding_valid = bindings in (
+                expected_bindings,
+                [item.removesuffix(":norbind") for item in expected_bindings],
+            )
+        else:
+            binding_valid = bindings in ([binding], [binding + ":rbind"])
         require(
             properties.get("NeedDaemonReload") == "no"
             and DNS_HOOK in properties.get("DropInPaths", "").split()
-            and bindings in ([binding], [binding + ":rbind"]),
+            and binding_valid,
             "K3s scoped resolver hook is not loaded exactly",
         )
         for filename in ("upstream-resolv.conf", "process-resolv.conf", "kubelet-resolv.conf"):
@@ -644,7 +660,17 @@ class Backend:
         )
         pid = properties.get("MainPID", "0")
         require(pid.isdigit(), "invalid K3s process identity")
-        if int(pid):
+        if directory_view:
+            dns.check_view(self.e, Path(f"/proc/{dns_pid}/root"))
+            require(
+                (dns.STATE / "upstream-resolv.conf").read_text()
+                == Path(f"/proc/{dns_pid}/root/run/systemd/resolve/stub-resolv.conf").read_text()
+                and (dns.STATE / "resolved/stub-resolv.conf").read_text() == expected,
+                "resolver publication differs from current original source",
+            )
+            if int(pid):
+                dns.check_process_view(self.e, pid, dns_pid, expected)
+        elif int(pid):
             require(
                 Path(f"/proc/{pid}/root/etc/resolv.conf").read_text() == expected,
                 "running K3s resolver view drifted; explicit restart required",
@@ -1896,6 +1922,7 @@ def prepare_resolver(request):
         Recovery(e, backend, Path("/unused-prepare-journal")).prove(include_local=True)
         dns = sibling("ethernet_mdns_resolver")
         e["pod_resolv_source"] = str(dns.select_pod_source())
+        e["resolver_view"] = dns.resolved_layout()
         files = dns.service_files(e)
         for path in files:
             require(
@@ -1923,7 +1950,12 @@ def enroll_checked(e, destination, backend):
     if e["schema_version"] == 2:
         dns = sibling("ethernet_mdns_resolver")
         trusted_file(dns.CONFIG)
-        e["pod_resolv_source"] = json.loads(dns.CONFIG.read_text())["pod_resolv_source"]
+        resolver_config = json.loads(dns.CONFIG.read_text())
+        e["pod_resolv_source"] = resolver_config["pod_resolv_source"]
+        e.pop("resolver_view", None)
+        if resolver_config.get("resolver_view") is not None:
+            dns.view_enabled(resolver_config)
+            e["resolver_view"] = resolver_config["resolver_view"]
     e.update(backend.inventory())
     e["local_ipv4"] = backend.address()
     if e["schema_version"] == 2:

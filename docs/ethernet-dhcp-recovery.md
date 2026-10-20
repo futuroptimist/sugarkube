@@ -490,3 +490,87 @@ later second-cluster/load-balancer work is not a prerequisite.
 8. Record staging evidence and owner acceptance before production. Prepare/enroll production
    separately with its own identities/backups; proceed one server at a time and verify all
    voters and workloads between steps. Keep K-339 open until real-world behavior is accepted.
+
+### Directory-backed resolver view (draft, not activated)
+
+New `prepare-resolver` installations record a versioned `resolver_view` descriptor.
+The first supported layout is exactly `/etc/resolv.conf` as the relative symlink
+`../run/systemd/resolve/stub-resolv.conf`. Other layouts, including an absolute symlink
+or a direct uplink symlink, are refused rather than shadowing an arbitrary directory.
+Existing enrollments without the descriptor retain their old rendering. That is format
+compatibility, not permission to replace their fingerprinted runtime.
+
+In K3s's service namespace, two nonrecursive read-only directory binds preserve the
+original `/run/systemd/resolve` at
+`/run/sugarkube-ethernet-dns/host-resolved`, then mount the generated `resolved` directory
+at `/run/systemd/resolve`. The alias destination sorts before the shadowed directory in
+systemd's mount ordering. Relative links preserve the original uplink resolver and both
+resolved IPC socket paths, including socket replacement. Only `stub-resolv.conf` is
+replaced by the scoped process resolver. The resolver daemon remains outside that view
+and reads original host DNS; kubelet's separate validated resolver copy is unchanged.
+No host symlink, resolver file, network setting or mount propagation policy is changed.
+
+`RuntimeDirectoryPreserve=yes` retains the source directories across resolver-service
+stop/restart. A root-owned identity record pins the runtime, view, alias placeholder and
+original resolved directory for that boot. Child files may be atomically replaced; the
+directories may not. Partial initialization or directory replacement is refused, never
+silently repaired. Do not remove the runtime directory while K3s or its descendants can
+still hold its mounts. Reboot clears `/run`; fresh initialization must finish before K3s
+starts. Replacing the original resolved directory requires explicit reconciliation too.
+
+Readiness verifies the loaded preservation setting and exact bindings, current host and
+pod resolver bytes, generated process bytes, and the running process's namespace, mount
+identities and read-only flags. Missing, extra child, writable or substituted mounts and
+changed symlinks/content refuse recovery. Search-domain loss (`search .`) and return are
+published through atomic child replacement; mismatched observations still refuse until
+consistent. Known systemd v255 resolver temporary files are checked for safe ownership,
+type and mode but are not projected as IPC entries. Unknown permanent entries are refused.
+
+#### Existing enrollment migration boundary
+
+The runtime-only replacement instructions above apply to the earlier bounded Node-address
+change through `1a9e7672`, **not** to this resolver-mount change. This change deliberately
+does not provide an automatic in-place migration command. `prepare-resolver` still refuses
+existing installation files; `enroll` still refuses an existing enrollment/hook. Do not
+remove those files to bypass refusal, regenerate enrollment, clear journals, or overwrite
+fingerprints to make a running installation pass.
+
+A separately approved activation/migration plan must identify the exact old and new file
+hashes and descriptor, preserve enrollment/member/cluster/Node/database identities and
+all journals, and validate every unrelated fingerprint unchanged. It must pause the timer,
+wait for controller completion, require no unresolved membership or Node-address intent,
+and prove the original healthy quorum and backups. On one server at a time, a controlled
+stop/activation must install the reviewed resolver files and narrowly update only their
+approved enrollment entries; restart with the existing recovery authorization intact.
+Require loaded-unit and actual mount/IPC/pod checks before resuming that server's timer.
+Interrupted migration must remain stopped for review, with the original bundle retained.
+An approved, tested migration procedure is a rollout gate; no migration was performed here.
+
+#### Proof and qualification
+
+The lab-reported October 20 synthetic proof reproduced file-bind loss after atomic target
+replacement and directory-bind survival plus generated-child updates under private mount
+propagation. The transferred script/result/run contents were reviewed. Their original-byte
+SHA-256 values are lab provenance, not independently verified hashes of rendered text:
+
+- Script: `5203d630d475175eba0d52edc1cb7b9f6a3b646461ceadac1545fbc0b62a9be8`.
+- Result: `10c5f7d2c66f7297c4a43b638dc321f6cb9d3d6eb3e6ef3384017a5c44062a10`.
+- Run: `af4ce89eaf3b616279b39e58502906ada22a791aa9e36caa30f9332568329f1e`.
+
+The new opt-in `tests/test_ethernet_resolver_namespace.py` exercises the generated bind
+list in disposable private namespaces, read-only enforcement, target/child replacement,
+and original IPC socket/uplink replacement. It requires an explicitly approved disposable
+mount-capable executor and `SUGARKUBE_RUN_MOUNT_PROOF=1`; ordinary CI skips it. A skip is
+not proof. It does not execute K3s or prove systemd's unit lifecycle.
+
+Before qualification, independently validate the generated systemd units and service
+stop/restart/reboot lifecycle, unknown layouts, tampering, interrupted publication/migration,
+NSS/resolved IPC and containerd/kubelet descendant namespaces. Then separately approve cold
+and running DHCP drills on both `v1.34.5+k3s1` and `v1.35.4+k3s1`, with search loss/return,
+original member/cluster/Node identities, committed markers, PVC and HTTPS checks. Existing
+pods and newly created pods must retain correct DNS; K3s must use the enrolled peer stub.
+None of this establishes all-member recovery without the existing required survivors.
+
+The earlier cold-test result remains attributed to exact `b2c1067c`. The proof VM is
+reported powered off. Existing lab timers remain paused, and q3's runtime MAC/IP versus
+VMX mismatch must be reconciled only under separate approval before any reboot or activation.

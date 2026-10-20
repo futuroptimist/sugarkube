@@ -15,6 +15,7 @@ import os
 import re
 import select
 import socket
+import stat
 import struct
 import subprocess
 import tempfile
@@ -42,6 +43,175 @@ POD_SOURCES = (
     Path("/run/systemd/resolve/resolv.conf"),
     Path("/var/lib/rancher/k3s/agent/etc/resolv.conf"),
 )
+RESOLVED = Path("/run/systemd/resolve")
+VIEW_KIND = "resolved-stub-directory-v1"
+RESOLVED_ENTRIES = {
+    "resolv.conf",
+    "stub-resolv.conf",
+    "io.systemd.Resolve",
+    "io.systemd.Resolve.Monitor",
+}
+
+
+def directory_identity(path, *, root_owned=False):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022 or (root_owned and info.st_uid != 0):
+        raise Unavailable("untrusted resolver directory")
+    return {"device": info.st_dev, "inode": info.st_ino, "uid": info.st_uid, "gid": info.st_gid}
+
+
+def resolved_layout(root=Path("/")):
+    """Only the observed resolved stub layout is supported, never an arbitrary parent."""
+    host = root / RESOLVED.relative_to("/")
+    link = os.readlink(root / HOST_RESOLV.relative_to("/"))
+    if link != "../run/systemd/resolve/stub-resolv.conf":
+        raise Unavailable("unsupported resolver symlink layout")
+    owner = directory_identity(host)
+    for path in host.iterdir():
+        # systemd v255 tempfn_random(): these unpublished files are not IPC entries.
+        temporary = re.fullmatch(r"\.\#(?:stub-resolv|resolv)\.conf[0-9a-f]{16}", path.name)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if temporary:
+                continue
+            raise
+        socket_entry = path.name.startswith("io.systemd.")
+        if (
+            (path.name not in RESOLVED_ENTRIES and not temporary)
+            or info.st_uid != owner["uid"]
+            or not (stat.S_ISSOCK(info.st_mode) if socket_entry else stat.S_ISREG(info.st_mode))
+            or (not socket_entry and info.st_mode & 0o022)
+        ):
+            raise Unavailable("unsupported resolved directory entry")
+    for name in ("stub-resolv.conf", "resolv.conf"):
+        if not (host / name).is_file():
+            raise Unavailable("missing original resolved file")
+    return {"kind": VIEW_KIND, "symlink": link, "uid": owner["uid"], "gid": owner["gid"]}
+
+
+def view_enabled(enrollment):
+    view = enrollment.get("resolver_view")
+    if view is None:
+        return False  # Existing enrollment is not silently migrated.
+    if (
+        not isinstance(view, dict)
+        or set(view) != {"kind", "symlink", "uid", "gid"}
+        or view["kind"] != VIEW_KIND
+        or view["symlink"] != "../run/systemd/resolve/stub-resolv.conf"
+        or any(type(view[key]) is not int or view[key] < 0 for key in ("uid", "gid"))
+    ):
+        raise Unavailable("unsupported enrolled resolver view")
+    return True
+
+
+def view_links():
+    # Relative links also remain inspectable through /proc/PID/root.
+    return {
+        name: f"../../{STATE.name}/host-resolved/{name}"
+        for name in RESOLVED_ENTRIES - {"stub-resolv.conf"}
+    }
+
+
+def view_identity(root=Path("/")):
+    state = root / STATE.relative_to("/")
+    host = root / RESOLVED.relative_to("/")
+    return {
+        "state": directory_identity(state, root_owned=True),
+        "view": directory_identity(state / "resolved", root_owned=True),
+        "alias": directory_identity(state / "host-resolved", root_owned=True),
+        "host": directory_identity(host),
+    }
+
+
+def check_view(enrollment, root=Path("/")):
+    state = root / STATE.relative_to("/")
+    if resolved_layout(root) != enrollment["resolver_view"]:
+        raise Unavailable("original resolver layout changed")
+    marker = state / "view-identity.json"
+    info = marker.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise Unavailable("untrusted resolver view identity")
+    identity = view_identity(root)
+    if json.loads(marker.read_text()) != identity:
+        raise Unavailable("resolver directory identity changed; explicit migration required")
+    view = state / "resolved"
+    if {p.name for p in view.iterdir()} != RESOLVED_ENTRIES:
+        raise Unavailable("unexpected resolver view entries")
+    for name, target in view_links().items():
+        if os.readlink(view / name) != target:
+            raise Unavailable("resolver compatibility link changed")
+    info = (view / "stub-resolv.conf").lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise Unavailable("untrusted process resolver view")
+    return identity
+
+
+def initialize_view(enrollment):
+    """Keep directory inodes across service restarts; interrupted setup is not repaired."""
+    if resolved_layout() != enrollment["resolver_view"]:
+        raise Unavailable("original resolver layout changed")
+    directory_identity(STATE, root_owned=True)
+    marker = STATE / "view-identity.json"
+    if marker.exists() or marker.is_symlink():
+        check_view(enrollment)
+        return
+    view, alias = STATE / "resolved", STATE / "host-resolved"
+    if any(path.exists() or path.is_symlink() for path in (view, alias)):
+        raise Unavailable("unfinished resolver view setup; explicit reconciliation required")
+    view.mkdir(mode=0o755)
+    alias.mkdir(mode=0o755)
+    for name, target in view_links().items():
+        (view / name).symlink_to(target)
+    atomic(view / "stub-resolv.conf", resolver_text(HOST_RESOLV.read_text())[1])
+    atomic(marker, json.dumps(view_identity(), sort_keys=True) + "\n")
+    check_view(enrollment)
+
+
+def resolver_bindings(enrollment):
+    if view_enabled(enrollment):
+        # systemd sorts destination paths: preserve the original directory before shadowing it.
+        return [f"{RESOLVED}:{STATE}/host-resolved:norbind", f"{STATE}/resolved:{RESOLVED}:norbind"]
+    return [f"{STATE}/process-resolv.conf:/etc/resolv.conf"]
+
+
+def check_process_view(enrollment, pid, dns_pid, expected):
+    """Validate the mount actually used by K3s, not just rendered systemd properties."""
+    original = Path(f"/proc/{dns_pid}/root")
+    identity = check_view(enrollment, original)
+    root = Path(f"/proc/{pid}/root")
+    if os.readlink(f"/proc/{pid}/ns/mnt") == os.readlink(f"/proc/{dns_pid}/ns/mnt"):
+        raise Unavailable("K3s resolver namespace is not isolated")
+    expected_mounts = {
+        str(RESOLVED): identity["view"],
+        str(STATE / "host-resolved"): identity["host"],
+    }
+    mounts = {path: [] for path in expected_mounts}
+    for line in Path(f"/proc/{pid}/mountinfo").read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 7 or "-" not in fields:
+            raise Unavailable("invalid K3s mount information")
+        target = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+        for path in mounts:
+            if target.startswith(path + "/"):
+                raise Unavailable("unexpected child mount in resolver view")
+            if target == path:
+                mounts[path].append(fields[5].split(","))
+    for path, pinned in expected_mounts.items():
+        actual = root / path.lstrip("/")
+        if (
+            len(mounts[path]) != 1
+            or "ro" not in mounts[path][0]
+            or directory_identity(actual) != pinned
+        ):
+            raise Unavailable("K3s resolver directory mount drifted")
+    if os.readlink(root / "etc/resolv.conf") != enrollment["resolver_view"]["symlink"]:
+        raise Unavailable("K3s resolver symlink drifted")
+    if (root / RESOLVED.relative_to("/") / "stub-resolv.conf").read_text() != expected:
+        raise Unavailable("running K3s resolver view drifted; explicit restart required")
+    # Check again after inspecting the running view; never accept a changed generation.
+    if check_view(enrollment, original) != identity:
+        raise Unavailable("resolver directory changed during observation")
 
 
 class Unavailable(ValueError):
@@ -53,12 +223,16 @@ def service_files(enrollment):
     Resolver(enrollment)  # Validate the exact allowlist before rendering it.
     if Path(enrollment["pod_resolv_source"]) not in POD_SOURCES:
         raise Unavailable("unsupported original kubelet resolver source")
+    directory_view = view_enabled(enrollment)
     config = {
         "schema_version": 2,
         "interface": enrollment["interface"],
         "pod_resolv_source": enrollment["pod_resolv_source"],
         "members": [{"hostname": m["hostname"]} for m in enrollment["members"]],
     }
+    if directory_view:
+        config["resolver_view"] = enrollment["resolver_view"]
+    preserve = "RuntimeDirectoryPreserve=yes\n" if directory_view else ""
     return {
         RUNTIME: Path(__file__).read_bytes(),
         CONFIG: (json.dumps(config, sort_keys=True) + "\n").encode(),
@@ -69,6 +243,7 @@ def service_files(enrollment):
             "StartLimitIntervalSec=300\nStartLimitBurst=3\n"
             "[Service]\nType=notify\nNotifyAccess=main\nUser=root\nUMask=0022\n"
             "RuntimeDirectory=sugarkube-ethernet-dns\nRuntimeDirectoryMode=0755\n"
+            f"{preserve}"
             f"ExecStart=/usr/bin/python3 -I {RUNTIME} --enrollment {CONFIG}\n"
             "TimeoutStartSec=15\nTimeoutStopSec=5\nRestart=on-failure\nRestartSec=10\n"
         ).encode(),
@@ -76,7 +251,7 @@ def service_files(enrollment):
             "# Managed by ethernet_quorum_recover.py\n[Unit]\n"
             "Requires=sugarkube-ethernet-dns.service\nAfter=sugarkube-ethernet-dns.service\n"
             "[Service]\n"
-            f"BindReadOnlyPaths={STATE}/process-resolv.conf:/etc/resolv.conf\n"
+            + "".join(f"BindReadOnlyPaths={binding}\n" for binding in resolver_bindings(enrollment))
         ).encode(),
         KUBELET_CONFIG: (
             "# Managed by ethernet_quorum_recover.py\n"
@@ -389,7 +564,10 @@ def atomic(path, content):
             os.unlink(temporary)
 
 
-def publish_config(source=HOST_RESOLV, state=STATE, pod_source=None):
+def publish_config(source=HOST_RESOLV, state=STATE, pod_source=None, enrollment=None):
+    directory_view = enrollment is not None and view_enabled(enrollment)
+    if directory_view:
+        check_view(enrollment)
     text = source.read_text()
     _, process = resolver_text(text)
     pod_text = pod_resolver_text((pod_source or source).read_text())
@@ -401,6 +579,11 @@ def publish_config(source=HOST_RESOLV, state=STATE, pod_source=None):
         path = state / name
         if not path.exists() or path.read_text() != value:
             atomic(path, value)
+    if directory_view:
+        view = state / "resolved" / "stub-resolv.conf"
+        if view.read_text() != process:
+            atomic(view, process)
+        check_view(enrollment)
 
 
 def serve(
@@ -476,7 +659,17 @@ def main():
     # systemd creates the root-owned runtime directory; never repair ownership.
     if STATE.is_symlink() or STATE.stat().st_uid != 0 or STATE.stat().st_mode & 0o022:
         raise Unavailable("untrusted resolver runtime directory")
-    serve(Resolver(enrollment), refresh=lambda: publish_config(pod_source=pod_source))
+    directory_view = view_enabled(enrollment)
+    if directory_view:
+        initialize_view(enrollment)
+    serve(
+        Resolver(enrollment),
+        refresh=lambda: (
+            publish_config(pod_source=pod_source, enrollment=enrollment)
+            if directory_view
+            else publish_config(pod_source=pod_source)
+        ),
+    )
 
 
 if __name__ == "__main__":

@@ -1706,6 +1706,7 @@ def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
     dns = SimpleNamespace(
         HOOK=installed / "hook",
         select_pod_source=lambda: Path("/run/systemd/resolve/resolv.conf"),
+        resolved_layout=lambda: {"kind": "resolved-stub-directory-v1"},
         service_files=lambda e: dict(files),
     )
     monkeypatch.setattr(MODULE, "Backend", lambda e: backend)
@@ -1838,3 +1839,49 @@ def test_v2_cli_records_only_confirmed_enrollment_transition(
     saved = json.loads(path.read_text())
     assert saved[flag] is True
     assert saved["dual_enrolled" if flag == "armed" else "armed"] is False
+
+
+@pytest.mark.parametrize("damage", [None, "lifetime", "binding", "source", "view", "mount"])
+def test_directory_resolver_controller_guard_keeps_exact_checks(
+    resolver_backend, virtual_root, monkeypatch, damage
+):
+    backend, props, state = resolver_backend
+    path, write = virtual_root
+    dns = MODULE.sibling("ethernet_mdns_resolver")
+    backend.e["resolver_view"] = {"kind": "resolved-stub-directory-v1"}
+    props["dns"].update(RuntimeDirectory="sugarkube-ethernet-dns", RuntimeDirectoryPreserve="yes")
+    bindings = ["/original:/alias:norbind", "/view:/target:norbind"]
+    props["k3s"]["BindReadOnlyPaths"] = " ".join(bindings)
+    dns.resolver_bindings = lambda e: bindings
+    calls = []
+    dns.check_view = lambda *args: calls.append("directory")
+
+    def running(*args):
+        calls.append("running")
+        if damage == "mount":
+            raise ValueError("mount drift")
+
+    dns.check_process_view = running
+    (state / "resolved").mkdir()
+    (state / "resolved/stub-resolv.conf").write_text((state / "process-resolv.conf").read_text())
+    write(
+        "/proc/42/root/run/systemd/resolve/stub-resolv.conf",
+        (state / "upstream-resolv.conf").read_text(),
+    )
+    if damage == "lifetime":
+        props["dns"]["RuntimeDirectoryPreserve"] = "no"
+    elif damage == "binding":
+        props["k3s"]["BindReadOnlyPaths"] += " /unexpected:/extra"
+    elif damage == "source":
+        write(
+            "/proc/42/root/run/systemd/resolve/stub-resolv.conf",
+            "nameserver 127.0.0.53\nsearch changed\n",
+        )
+    elif damage == "view":
+        (state / "resolved/stub-resolv.conf").write_text("wrong")
+    if damage:
+        with pytest.raises((MODULE.Stop, ValueError)):
+            backend.resolver_ready()
+    else:
+        backend.resolver_ready()
+        assert calls == ["directory", "running"]
