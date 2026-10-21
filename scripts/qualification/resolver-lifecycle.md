@@ -14,8 +14,8 @@ Budget at most 12 GiB additional disk under the 140 GiB total cap. Check capacit
 before creating it; do not delete retained evidence to make room.
 
 The 30-minute window allocates five minutes to boot, fifteen to tests and ten to
-cleanup and graceful shutdown. The reviewed one-shot boot wrapper must record
-progress and preserve failure evidence. No reboot, hard power-off, credential
+cleanup and graceful shutdown. The reviewed `resolver_oneshot.py` boot wrapper records
+progress and preserves failure evidence. No reboot, hard power-off, credential
 setup, security-policy change or privileged-executor fallback is authorized.
 A timeout or uncertain cleanup is incomplete qualification: report and stop,
 preserving the VM for owner inspection. Existing VMs, q3 divergence, timers,
@@ -55,27 +55,52 @@ The production `check_process_view()` still checks the **real guest**
 this is not validation of the synthetic symlink by that particular guard.
 No real guest resolver file is written or bind-mounted.
 
+## Rebuild on ESPC or another connected preparation machine
+
+No private workspace archive is required. Obtain the exact full commit SHA from
+this implementation handoff and fetch it through existing repository access.
+Do not substitute the moving branch head. Use Python 3.12 on the preparation machine:
+
+```sh
+git fetch origin FULL_40_CHARACTER_COMMIT_SHA
+git worktree add --detach resolver-qualification-source FULL_40_CHARACTER_COMMIT_SHA
+python3 resolver-qualification-source/scripts/qualification/build_resolver_bundle.py \
+  --repo resolver-qualification-source --commit FULL_40_CHARACTER_COMMIT_SHA \
+  --output resolver-lifecycle-bundle.tar.gz
+```
+
+Replace every placeholder with the same exact published commit. The builder reads
+source through `git show COMMIT:path`, downloads only pinned official PyPI wheel
+URLs, verifies byte counts and SHA256 values against the committed manifest, and
+extracts pure dependencies without an installer. The archive includes `deps/`;
+the guest needs neither pip nor cached wheels. Tar ordering, ownership, modes,
+timestamps and gzip timestamps are normalized. With the same Python/compression
+implementation, repeated builds produce identical bytes; per-file SHA256 values
+provide the portable comparison across platforms. The manifest records the commit.
+
 ## Reviewed future invocation
 
-After separate execution approval, transfer and verify `SHA256SUMS` before
-extracting or running anything. The bundle contains `source/`, `wheels/`, and
+After separate execution approval, verify the archive hash before extraction and
+then verify `SHA256SUMS`. The bundle contains `source/`, `wheels/`, `deps/` and
 `python-dependencies.json`. Use paths without spaces or systemd expansion characters.
-The preparation helper only verifies/unpacks pure wheels into a fresh private
-directory; it does not invoke pip, install system packages or run the harness.
+Image delivery and enabling the supplied boot unit remain separately approved actions.
 
 ```sh
 cd /opt/resolver-lifecycle-bundle
 sha256sum -c SHA256SUMS
-python3 source/scripts/qualification/resolver_offline_prepare.py "$PWD" "$PWD/deps"
-export PYTHONPATH="$PWD/deps"
-export SUGARKUBE_RUN_MOUNT_PROOF=1
-export SUGARKUBE_SKIP_PREINSTALL_TOOLS=1
-export SUGARKUBE_PREINSTALL_TOOL_SHIMS=0
-export SUGARKUBE_ALLOW_TOOL_SHIMS=0
-export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-python3 source/scripts/qualification/resolver_lifecycle.py --run-approved "$PWD/result.json"
+python3 source/scripts/qualification/resolver_oneshot.py --run-approved "$PWD"
 ```
 
+For approved boot delivery, embed `sugarkube-lifecycle-proof.service` in the new
+image and enable only that unit. Its fixed bundle path is shown above. It requires
+the exact hostname and refuses replay when persistent evidence already exists.
+Do not also run the manual invocation. The unit never restarts the wrapper or
+escalates to SIGKILL; the wrapper owns its deadlines. The dedicated probe units
+also disable SIGKILL escalation and have five-second stop timeouts.
+
+The wrapper sets `SUGARKUBE_RUN_MOUNT_PROOF=1`,
+`SUGARKUBE_SKIP_PREINSTALL_TOOLS=1`, `SUGARKUBE_PREINSTALL_TOOL_SHIMS=0`,
+`SUGARKUBE_ALLOW_TOOL_SHIMS=0` and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.
 The harness additionally passes `--noconftest` and disables the cache provider.
 Exactly two namespace cases must complete, with zero skips/errors/failures.
 Missing native tools, unexpected host layout or any skipped test is incomplete
@@ -100,9 +125,29 @@ exercises systemd's actual generated bindings and preserved runtime directory:
 Probe units exist only in `/run/systemd/system` and are never enabled. Unit start,
 stop and daemon-reload affect this disposable VM only. Failed service cleanup
 preserves fixture state; it must never trigger force-unmount or global process kills.
-The boot wrapper must retain console output, native baseline, JSON/XML results,
-unit journals and artifact hashes, then verify cleanup from the powered-off disk
-after a successful graceful shutdown. No result means no qualification pass.
+The wrapper rejects boot uptime over five minutes, bounds its own test session to
+fifteen minutes, and reserves at most ten minutes for cleanup, all within thirty
+minutes of guest boot. Pytest no longer has a parent-only 20-second timeout: its
+descendants inherit the wrapper-created session/process group. At timeout or
+unexpected parent exit, the wrapper verifies recorded group/session and leader
+start-time identity before sending TERM, then waits at most two minutes. It stops
+only the two initially absent dedicated probe units. Already removed, inactive
+units count as cleaned only after their properties are checked. There is no
+host-wide signaling, force-unmount, reboot or hard-stop fallback.
+
+Persistent evidence in `/var/lib/sugarkube-qualification-evidence` includes early
+failures, harness output, native/DNS/network baselines, owned process identity,
+pre-cleanup state, available JSON/XML results, probe journals and pre-shutdown
+process/unit/mount/fixture verification. Missing early XML is a failure, not an
+inferred pass. Cleanup scans live process mountinfo for fixture mounts and checks
+that no owned processes, units or fixture directories remain before graceful
+power-off. Failed or ambiguous cleanup preserves fixtures and leaves the guest
+running for owner inspection. JSON evidence is flushed before shutdown; retain
+console and disk artifacts too.
+
+After shutdown, independently read those persisted **pre-shutdown** records and
+their hashes from disk. Absence of `/run` afterward is not cleanup proof because
+that filesystem is volatile. No result means no qualification pass.
 
 Risks are guest-local service/mount leaks, failed shutdown, and fixture mistakes;
 NIC-free isolation and no shared storage bound their reach. This stage cannot prove

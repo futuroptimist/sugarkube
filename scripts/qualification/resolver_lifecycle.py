@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -197,32 +198,36 @@ def qualify(output):
         assert run("systemctl", "show", name, "--property=LoadState") == "LoadState=not-found"
     before = baseline()
     assert [v["ifname"] for v in before["links"]] == ["lo"]
-    # This qualification deliberately bypasses repository conftest, as well as disabling
-    # its install/shim switches. No pytest plugins or implicit tool installers are used.
-    run(
-        sys.executable,
-        "-m",
-        "pytest",
-        "--noconftest",
-        "-p",
-        "no:cacheprovider",
-        "-q",
-        "-o",
-        "addopts=",
-        str(REPO / "tests/test_ethernet_resolver_namespace.py"),
-        "--junitxml=" + str(output.with_suffix(".xml")),
-    )
-    import xml.etree.ElementTree as ET
-
-    report = ET.parse(output.with_suffix(".xml")).getroot()
-    cases = report.findall(".//testcase")
-    assert len(cases) == 2 and not report.findall(".//skipped")
-    assert not report.findall(".//failure") and not report.findall(".//error")
-    result = {"namespace_cases": 2, "observations": [], "refusals": [], "before": before}
+    result = {"namespace_cases": 0, "observations": [], "refusals": [], "before": before}
     dns = module()
     ipc = None
     installed = []
     try:
+        # This qualification deliberately bypasses repository conftest, as well as disabling
+        # its install/shim switches. No pytest plugins or implicit tool installers are used.
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--noconftest",
+                "-p",
+                "no:cacheprovider",
+                "-q",
+                "-o",
+                "addopts=",
+                str(REPO / "tests/test_ethernet_resolver_namespace.py"),
+                "--junitxml=" + str(output.with_suffix(".xml")),
+            ],
+            check=True,
+        )
+        import xml.etree.ElementTree as ET
+
+        report = ET.parse(output.with_suffix(".xml")).getroot()
+        cases = report.findall(".//testcase")
+        assert len(cases) == 2 and not report.findall(".//skipped")
+        assert not report.findall(".//failure") and not report.findall(".//error")
+        result["namespace_cases"] = 2
         dns.RESOLVED.mkdir(parents=True)
         dns.HOST_RESOLV.parent.mkdir()
         dns.HOST_RESOLV.symlink_to("../run/systemd/resolve/stub-resolv.conf")
@@ -264,10 +269,10 @@ def qualify(output):
         env = os.environ.get("PYTHONPATH", "")
         assert all(c not in env + str(SCRIPT) + sys.executable for c in ('"', "\n", "%", " "))
         units = [
-            "[Service]\nType=simple\n"
+            "[Service]\nType=simple\nTimeoutStopSec=5\nSendSIGKILL=no\n"
             + "\n".join(runtime_lines)
             + "\nExecStart=/usr/bin/sleep infinity\n",
-            "[Service]\nType=simple\n"
+            "[Service]\nType=simple\nTimeoutStopSec=5\nSendSIGKILL=no\n"
             + "\n".join(bind_lines)
             + f'\nEnvironment="PYTHONPATH={env}"\nExecStart={sys.executable} {SCRIPT} --probe\n',
         ]
@@ -401,7 +406,8 @@ def qualify(output):
         try:
             assert str(ROOT) not in Path("/proc/self/mountinfo").read_text()
             if not errors:
-                shutil.rmtree(ROOT)
+                if ROOT.exists():
+                    shutil.rmtree(ROOT)
                 assert not ROOT.exists()
             result["after"] = baseline()
             assert result["after"] == before
@@ -426,4 +432,17 @@ if __name__ == "__main__":
     elif args.probe:
         probe()
     else:
-        qualify(args.run_approved.resolve())
+
+        def interrupted(signum, frame):
+            raise InterruptedError(f"qualification interrupted by signal {signum}")
+
+        signal.signal(signal.SIGTERM, interrupted)
+        output = args.run_approved.resolve()
+        try:
+            qualify(output)
+        except BaseException as error:
+            # Capture preflight/import/early pytest failures too. Never overwrite a
+            # detailed cleanup result or claim a failure before fixture setup passed.
+            if output.parent.is_dir() and not output.exists():
+                output.write_text(json.dumps({"passed": False, "early_error": repr(error)}) + "\n")
+            raise
