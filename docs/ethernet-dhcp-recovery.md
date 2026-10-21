@@ -527,12 +527,21 @@ published through atomic child replacement; mismatched observations still refuse
 consistent. Known systemd v255 resolver temporary files are checked for safe ownership,
 type and mode but are not projected as IPC entries. Unknown permanent entries are refused.
 
+After a directory-backed resolver has become ready, temporary source read or content errors
+leave its listener running and retain the last published files. Fresh source and generated-file
+checks still block recovery until publication catches up. Initial readiness, changed layouts or
+directory identities, and publication failures remain fatal; legacy file-bind behavior is
+unchanged. TCP header and body reads share a fixed deadline so slow senders cannot indefinitely
+occupy the resolver's workers.
+
 #### Existing enrollment migration boundary
 
 The runtime-only replacement instructions above apply to the earlier bounded Node-address
 change through `1a9e7672`, **not** to this resolver-mount change. This change deliberately
 does not provide an automatic in-place migration command. `prepare-resolver` still refuses
-existing installation files; `enroll` still refuses an existing enrollment/hook. Do not
+any existing enrollment before proof or installation, as well as existing installation files;
+`enroll` still refuses an existing enrollment/hook. Fresh preparation publishes the kubelet DNS
+YAML only after the resolver's required files and K3s dependency hook are durable. Do not
 remove those files to bypass refusal, regenerate enrollment, clear journals, or overwrite
 fingerprints to make a running installation pass.
 

@@ -1909,6 +1909,10 @@ def enroll(request, destination):
 
 def prepare_resolver(request):
     """Healthy-time, inactive resolver installation; never change certificates."""
+    require(
+        not ENROLLMENT.exists() and not ENROLLMENT.is_symlink(),
+        "existing enrollment requires explicit migration; resolver preparation refused",
+    )
     trusted_file(request)
     e = json.loads(request.read_text())
     require(e["schema_version"] == 2, "explicit version 2 request required")
@@ -1930,12 +1934,17 @@ def prepare_resolver(request):
                 "existing resolver preparation requires reconciliation",
             )
             install_directory(path.parent)
+        # Kubelet must not consume a runtime resolver path until its producer
+        # and the K3s dependency on that producer are durably installed.
+        kubelet_config = files.pop(dns.KUBELET_CONFIG)
         hook = files.pop(dns.HOOK)
         for path, content in files.items():
             atomic_write(path, content)
             path.chmod(0o644)
         atomic_write(dns.HOOK, hook)
         dns.HOOK.chmod(0o644)
+        atomic_write(dns.KUBELET_CONFIG, kubelet_config)
+        dns.KUBELET_CONFIG.chmod(0o644)
         return (
             "resolver prepared inactive; owner must activate and qualify "
             "one healthy server at a time"

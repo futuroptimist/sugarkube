@@ -1709,9 +1709,8 @@ def test_workload_completion_checks_real_shapes(enrollment, monkeypatch, damage)
         assert calls[-1] == "closed"
 
 
-def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
-    enrollment, tmp_path, monkeypatch
-):
+@pytest.fixture
+def resolver_preparation(enrollment, tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     enrollment.update(schema_version=2, completion_https_urls=["https://app.example/health"])
@@ -1720,9 +1719,16 @@ def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
     backend.inventory = lambda: {"files": enrollment["files"]}
     backend.local_database = lambda: {"member_id": "1", "cluster_id": "100"}
     installed = tmp_path / "installed"
-    files = {installed / "runtime": b"reviewed", installed / "hook": b"hook"}
+    files = {
+        installed / "runtime": b"reviewed",
+        installed / "config": b"resolver config",
+        installed / "service": b"resolver producer",
+        installed / "hook": b"Requires=resolver producer",
+        installed / "kubelet.yaml": b"resolv-conf: generated-by-resolver",
+    }
     dns = SimpleNamespace(
         HOOK=installed / "hook",
+        KUBELET_CONFIG=installed / "kubelet.yaml",
         select_pod_source=lambda: Path("/run/systemd/resolve/resolv.conf"),
         resolved_layout=lambda: {"kind": "resolved-stub-directory-v1"},
         service_files=lambda e: dict(files),
@@ -1730,8 +1736,16 @@ def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
     monkeypatch.setattr(MODULE, "Backend", lambda e: backend)
     monkeypatch.setattr(MODULE, "sibling", lambda name: dns)
     monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+    monkeypatch.setattr(MODULE, "ENROLLMENT", tmp_path / "enrollment.json")
     request = tmp_path / "request.json"
     request.write_text(json.dumps(enrollment))
+    return request, files, dns, backend
+
+
+def test_prepare_resolver_publishes_kubelet_config_last_and_never_overwrites(
+    resolver_preparation, monkeypatch
+):
+    request, files, dns, backend = resolver_preparation
     writes = []
     atomic = MODULE.atomic_write
 
@@ -1741,12 +1755,78 @@ def test_prepare_resolver_publishes_hook_last_and_never_overwrites(
 
     monkeypatch.setattr(MODULE, "atomic_write", record)
     assert "prepared inactive" in MODULE.prepare_resolver(request)
-    assert writes[-1] == dns.HOOK
+    assert writes[-2:] == [dns.HOOK, dns.KUBELET_CONFIG]
     assert all(p.read_bytes() == v for p, v in files.items())
     assert not updates(backend)
     with pytest.raises(MODULE.Stop, match="existing resolver"):
         MODULE.prepare_resolver(request)
     assert writes == list(files)
+
+
+@pytest.mark.parametrize("boundary", range(5))
+@pytest.mark.parametrize("after_write", [False, True])
+def test_resolver_preparation_interruption_preserves_dependency_order(
+    resolver_preparation, monkeypatch, boundary, after_write
+):
+    request, files, dns, backend = resolver_preparation
+    atomic = MODULE.atomic_write
+    writes = []
+
+    def interrupted(path, content):
+        index = len(writes)
+        writes.append(path)
+        if index == boundary and not after_write:
+            raise OSError("injected publication failure")
+        atomic(path, content)
+        if index == boundary and after_write:
+            raise OSError("injected post-publication failure")
+
+    monkeypatch.setattr(MODULE, "atomic_write", interrupted)
+    with pytest.raises(OSError, match="publication failure"):
+        MODULE.prepare_resolver(request)
+    # Model reboot discovery from persisted files, not the successful return path.
+    if dns.HOOK.exists():
+        for path in files.keys() - {dns.HOOK, dns.KUBELET_CONFIG}:
+            assert path.read_bytes() == files[path]
+    if dns.KUBELET_CONFIG.exists():
+        assert dns.HOOK.read_bytes() == files[dns.HOOK]
+        assert all(path.read_bytes() == content for path, content in files.items())
+    assert not updates(backend)
+    persisted = {path: path.read_bytes() for path in files if path.exists()}
+    if persisted:
+        with pytest.raises(MODULE.Stop, match="existing resolver"):
+            MODULE.prepare_resolver(request)
+        assert {path: path.read_bytes() for path in files if path.exists()} == persisted
+
+
+@pytest.mark.parametrize("existing", ["v1", "v2", "invalid", "directory", "dangling-link"])
+def test_resolver_preparation_refuses_existing_enrollment_before_any_proof(
+    tmp_path, monkeypatch, existing
+):
+    path = tmp_path / "enrollment.json"
+    if existing == "directory":
+        path.mkdir()
+    elif existing == "dangling-link":
+        path.symlink_to(tmp_path / "missing")
+    else:
+        path.write_text(
+            json.dumps({"schema_version": int(existing[1])})
+            if existing.startswith("v")
+            else "invalid but must not be replaced"
+        )
+    before = path.lstat()
+    original = path.read_bytes() if path.is_file() else None
+    monkeypatch.setattr(MODULE, "ENROLLMENT", path)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("existing enrollment must refuse before proof or publication")
+
+    for name in ("Backend", "trusted_file", "install_directory", "atomic_write"):
+        monkeypatch.setattr(MODULE, name, unexpected)
+    with pytest.raises(MODULE.Stop, match="existing enrollment requires explicit migration"):
+        MODULE.prepare_resolver(tmp_path / "unread-request.json")
+    assert path.lstat() == before
+    assert (path.read_bytes() if path.is_file() else None) == original
 
 
 def test_sibling_import_and_etcd_health_request_are_bounded(enrollment, monkeypatch):

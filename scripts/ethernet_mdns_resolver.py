@@ -218,6 +218,10 @@ class Unavailable(ValueError):
     """No single fresh interface-local locator can be established."""
 
 
+class SourceUnavailable(Unavailable):
+    """An input resolver file cannot currently supply a valid configuration."""
+
+
 def service_files(enrollment):
     """Inactive installation only. No daemon-reload, restart or host DNS edit."""
     Resolver(enrollment)  # Validate the exact allowlist before rendering it.
@@ -447,9 +451,17 @@ def select_pod_source(candidates=POD_SOURCES):
     raise Unavailable("no existing valid K3s kubelet resolver source")
 
 
-def read_exact(sock, count):
+def socket_deadline(sock, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("DNS TCP request deadline exceeded")
+    sock.settimeout(remaining)
+
+
+def read_exact(sock, count, deadline):
     chunks = bytearray()
     while len(chunks) < count:
+        socket_deadline(sock, deadline)
         data = sock.recv(count - len(chunks))
         if not data:
             raise Unavailable("DNS TCP session ended")
@@ -463,14 +475,16 @@ def forward(data, upstreams, tcp=False):
         family = socket.AF_INET6 if ":" in upstream else socket.AF_INET
         try:
             with socket.socket(family, socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM) as sock:
+                deadline = time.monotonic() + 0.6
                 sock.settimeout(0.6)
                 sock.connect((upstream, 53))
+                socket_deadline(sock, deadline)
                 if tcp:
                     sock.sendall(struct.pack("!H", len(data)) + data)
-                    length = struct.unpack("!H", read_exact(sock, 2))[0]
+                    length = struct.unpack("!H", read_exact(sock, 2, deadline))[0]
                     if length > 65535:
                         raise Unavailable("oversized upstream reply")
-                    answer = read_exact(sock, length)
+                    answer = read_exact(sock, length, deadline)
                 else:
                     sock.sendall(data)
                     answer = sock.recv(65535)
@@ -568,9 +582,14 @@ def publish_config(source=HOST_RESOLV, state=STATE, pod_source=None, enrollment=
     directory_view = enrollment is not None and view_enabled(enrollment)
     if directory_view:
         check_view(enrollment)
-    text = source.read_text()
-    _, process = resolver_text(text)
-    pod_text = pod_resolver_text((pod_source or source).read_text())
+    try:
+        text = source.read_text()
+        _, process = resolver_text(text)
+        pod_text = pod_resolver_text((pod_source or source).read_text())
+    except (OSError, ValueError) as exc:
+        # Only input reads/parsing are retryable. Layout/identity checks above,
+        # output publication and the post-publication identity check stay fatal.
+        raise SourceUnavailable("resolver source temporarily unavailable") from exc
     for name, value in (
         ("upstream-resolv.conf", text),
         ("process-resolv.conf", process),
@@ -587,7 +606,14 @@ def publish_config(source=HOST_RESOLV, state=STATE, pod_source=None, enrollment=
 
 
 def serve(
-    resolver, *, address=LISTEN, port=PORT, stop=None, refresh=publish_config, ready=notify_ready
+    resolver,
+    *,
+    address=LISTEN,
+    port=PORT,
+    stop=None,
+    refresh=publish_config,
+    ready=notify_ready,
+    retry_source=False,
 ):
     """Fixed worker pool, bounded admission and deadlines; no thread per packet."""
     stop = stop or threading.Event()
@@ -610,16 +636,19 @@ def serve(
                 if not ipaddress.ip_address(peer[0]).is_loopback:
                     return
                 if client is not None:
-                    client.settimeout(2)
-                    length = struct.unpack("!H", read_exact(client, 2))[0]
+                    deadline = time.monotonic() + 2
+                    length = struct.unpack("!H", read_exact(client, 2, deadline))[0]
                     if not 0 < length <= MAX_PACKET:
                         return
-                    data = read_exact(client, length)
+                    data = read_exact(client, length, deadline)
                 answer = resolver.answer(data, tcp=client is not None)
                 if answer:
                     if client is None:
                         udp.sendto(answer, peer)
                     else:
+                        # Answer generation has its own bounded DNS work. Do not
+                        # allow a slow receiver to retain this worker indefinitely.
+                        client.settimeout(2)
                         client.sendall(struct.pack("!H", len(answer)) + answer)
             except (OSError, ValueError):
                 pass
@@ -630,7 +659,15 @@ def serve(
 
         while not stop.is_set():
             if time.monotonic() - last_refresh >= 1:
-                refresh()
+                try:
+                    refresh()
+                except SourceUnavailable:
+                    if not retry_source:
+                        raise
+                    # Keep the established listener alive across DHCP source
+                    # churn. Recovery still checks fresh source/generated bytes;
+                    # no stale generation is declared current or republished.
+                    pass
                 last_refresh = time.monotonic()
             readable, _, _ = select.select([udp, tcp], [], [], 0.2)
             for sock in readable:
@@ -664,6 +701,7 @@ def main():
         initialize_view(enrollment)
     serve(
         Resolver(enrollment),
+        retry_source=directory_view,
         refresh=lambda: (
             publish_config(pod_source=pod_source, enrollment=enrollment)
             if directory_view

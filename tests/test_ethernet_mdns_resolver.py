@@ -322,13 +322,23 @@ def test_interface_snapshot_is_bounded_and_primary_only(monkeypatch, damage):
 
 
 @pytest.mark.parametrize(
-    "tcp,damage", [(False, None), (True, None), (False, "id"), (True, "eof"), (False, "truncate")]
+    "tcp,damage",
+    [
+        (False, None),
+        (True, None),
+        (False, "id"),
+        (True, "eof"),
+        (False, "truncate"),
+        (True, "slow"),
+    ],
 )
 def test_forward_checks_response_and_tcp_fallback(monkeypatch, tcp, damage):
     query = DNSRecord.question("example.test")
     answer = query.reply()
     answer.add_answer(RR(query.q.qname, QTYPE.A, rdata=A("192.0.2.1"), ttl=20))
     calls = []
+    clock = [0.0]
+    monkeypatch.setattr(DNS.time, "monotonic", lambda: clock[0])
 
     class Socket:
         def __init__(self, family, kind):
@@ -343,7 +353,7 @@ def test_forward_checks_response_and_tcp_fallback(monkeypatch, tcp, damage):
             pass
 
         def settimeout(self, value):
-            assert value == 0.6
+            assert 0 < value <= 0.6
 
         def connect(self, target):
             assert target == ("::1", 53)
@@ -360,16 +370,21 @@ def test_forward_checks_response_and_tcp_fallback(monkeypatch, tcp, damage):
         def recv(self, count):
             if damage == "eof":
                 return b""
+            if damage == "slow":
+                clock[0] += 0.2
+                count = 1
             result, self.remaining = self.remaining[:count], self.remaining[count:]
             return result
 
     monkeypatch.setattr(DNS.socket, "socket", Socket)
-    if damage in ("id", "eof"):
+    if damage in ("id", "eof", "slow"):
         with pytest.raises(DNS.Unavailable, match="upstream unavailable"):
             DNS.forward(query.pack(), ["::1"], tcp)
     else:
         assert DNS.forward(query.pack(), ["::1"], tcp) == answer.pack()
     assert len(calls) == (2 if damage == "truncate" else 1)
+    if damage == "slow":
+        assert clock[0] == pytest.approx(0.6)
 
 
 def test_resolver_rejects_bad_queries_and_truncates_oversized_udp(tmp_path):
@@ -442,7 +457,12 @@ def test_service_entry_validates_enrollment_and_runtime_before_serving(
     )
     calls = []
     monkeypatch.setattr(DNS, "publish_config", lambda **kwargs: calls.append(kwargs))
-    monkeypatch.setattr(DNS, "serve", lambda resolver, refresh: refresh())
+
+    def serve(resolver, refresh, retry_source):
+        assert retry_source is False  # Legacy file-bind behavior is unchanged.
+        refresh()
+
+    monkeypatch.setattr(DNS, "serve", serve)
     if damage:
         with pytest.raises(DNS.Unavailable):
             DNS.main()
@@ -540,13 +560,19 @@ def test_discovery_packet_flood_fails_before_returning_locator(monkeypatch):
     assert closed == [True]
 
 
-@pytest.mark.parametrize("peer,count", [("192.0.2.1", 1), ("127.0.0.1", 9)])
-def test_tcp_admission_rejects_foreign_peers_and_closes_over_capacity(monkeypatch, peer, count):
+@pytest.mark.parametrize(
+    "peer,count,trickle", [("192.0.2.1", 1, False), ("127.0.0.1", 9, False), ("127.0.0.1", 9, True)]
+)
+def test_tcp_admission_rejects_foreign_peers_and_closes_over_capacity(
+    monkeypatch, peer, count, trickle
+):
     from types import SimpleNamespace
 
     stop = threading.Event()
     query = DNSRecord.question("pi1.local").pack()
     queued, answered, clients = [], [], []
+    clock = [0.0]
+    monkeypatch.setattr(DNS.time, "monotonic", lambda: clock[0])
 
     class Client:
         def __init__(self):
@@ -556,10 +582,13 @@ def test_tcp_admission_rejects_foreign_peers_and_closes_over_capacity(monkeypatc
             self.sent = []
 
         def settimeout(self, value):
-            assert value == 2
+            assert 0 < value <= 2
 
         def recv(self, size):
             self.reads += 1
+            if trickle:
+                clock[0] += 0.5
+                size = 1
             data, self.data = self.data[:size], self.data[size:]
             return data
 
@@ -638,7 +667,173 @@ def test_tcp_admission_rejects_foreign_peers_and_closes_over_capacity(monkeypatc
     assert len(queued) == min(count, 8)
     if peer == "192.0.2.1":
         assert answered == [] and clients[0].reads == 0 and clients[0].sent == []
+    elif trickle:
+        assert answered == []
+        assert all(client.reads == 4 and client.sent == [] for client in clients[:8])
+        assert clock[0] == 16  # Eight slow sessions consume bounded two-second read budgets.
     else:
         assert len(answered) == 8
         assert all(len(client.sent) == 1 for client in clients[:8])
         assert clients[-1].sent == []
+
+
+@pytest.mark.parametrize("budget", [0.6, 2.0])
+def test_tcp_deadline_spans_header_and_trickled_body(monkeypatch, budget):
+    clock = [0.0]
+    timeouts = []
+    payload = bytearray(b"\x00\x10" + b"x" * 16)
+
+    class Trickle:
+        def settimeout(self, value):
+            timeouts.append(value)
+
+        def recv(self, count):
+            clock[0] += budget / 4
+            return bytes([payload.pop(0)])
+
+    monkeypatch.setattr(DNS.time, "monotonic", lambda: clock[0])
+    sock = Trickle()
+    deadline = clock[0] + budget
+    length = struct.unpack("!H", DNS.read_exact(sock, 2, deadline))[0]
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        DNS.read_exact(sock, length, deadline)
+    assert clock[0] == pytest.approx(budget)
+    assert len(timeouts) == 4
+    assert timeouts == sorted(timeouts, reverse=True)
+    assert len(payload) == 14  # The slow sender cannot keep resetting the deadline.
+
+
+@pytest.mark.parametrize("damage", ["empty", "missing", "malformed"])
+def test_source_failure_preserves_generation_then_recovers(tmp_path, damage):
+    host, pod, state = tmp_path / "host", tmp_path / "pod", tmp_path / "state"
+    state.mkdir()
+    host.write_text("nameserver 127.0.0.53\nsearch old\n")
+    pod.write_text("nameserver 192.0.2.53\nsearch old\n")
+    DNS.publish_config(host, state, pod)
+    before = {p.name: (p.read_bytes(), p.stat().st_ino) for p in state.iterdir()}
+    host.write_text("nameserver 127.0.0.53\nsearch renewed\n")
+    if damage == "missing":
+        pod.unlink()
+    else:
+        pod.write_text("search .\n" if damage == "empty" else "nameserver invalid\n")
+    with pytest.raises(DNS.SourceUnavailable):
+        DNS.publish_config(host, state, pod)
+    assert {p.name: (p.read_bytes(), p.stat().st_ino) for p in state.iterdir()} == before
+    pod.write_text("nameserver 192.0.2.54\nsearch renewed\n")
+    DNS.publish_config(host, state, pod)
+    assert (state / "kubelet-resolv.conf").read_text() == pod.read_text()
+    assert (state / "process-resolv.conf").read_text() == DNS.resolver_text(host.read_text())[1]
+
+
+@pytest.mark.parametrize("failure", [DNS.Unavailable("identity changed"), OSError("disk failed")])
+def test_publication_and_identity_failures_are_not_retryable(tmp_path, monkeypatch, failure):
+    source = tmp_path / "source"
+    source.write_text("nameserver 192.0.2.53\n")
+
+    def fail(*args):
+        raise failure
+
+    if isinstance(failure, DNS.Unavailable):
+        monkeypatch.setattr(DNS, "view_enabled", lambda e: True)
+        monkeypatch.setattr(DNS, "check_view", fail)
+    else:
+        monkeypatch.setattr(DNS, "atomic", fail)
+    with pytest.raises(type(failure)) as caught:
+        DNS.publish_config(source, tmp_path, enrollment={})
+    assert caught.value is failure
+    assert not isinstance(caught.value, DNS.SourceUnavailable)
+
+
+@pytest.mark.parametrize("fatal", [None, "identity", "publication", "initial", "legacy"])
+def test_running_refresh_retries_only_source_failures(monkeypatch, fatal):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    stop = threading.Event()
+    calls, ready, answers, closed = [], [], [], []
+    query = DNSRecord.question("pi0.local").pack()
+
+    class Listener:
+        def __init__(self, *args):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            closed.append(self)
+
+        def bind(self, *args):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", 12345)
+
+        def setsockopt(self, *args):
+            pass
+
+        def listen(self, *args):
+            pass
+
+        def recvfrom(self, *args):
+            return query, ("127.0.0.1", 12346)
+
+        def sendto(self, data, peer):
+            answers.append(data)
+
+    class Workers:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def submit(self, fn, *args):
+            fn(*args)
+
+    def refresh():
+        calls.append(clock[0])
+        if fatal == "initial":
+            raise DNS.SourceUnavailable("no initial generation")
+        if len(calls) == 1:
+            return
+        if fatal == "identity":
+            raise DNS.Unavailable("identity changed")
+        if fatal == "publication":
+            raise OSError("publication failed")
+        if len(calls) < 6:
+            raise DNS.SourceUnavailable("DHCP source unavailable")
+        stop.set()  # A fresh valid generation resumes without restarting the service.
+
+    def readable(sockets, *args):
+        clock[0] += 11
+        return [sockets[0]], [], []
+
+    monkeypatch.setattr(DNS.socket, "socket", Listener)
+    monkeypatch.setattr(DNS, "ThreadPoolExecutor", Workers)
+    monkeypatch.setattr(DNS.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(DNS.select, "select", readable)
+
+    def run():
+        DNS.serve(
+            SimpleNamespace(answer=lambda data, tcp: DNSRecord.parse(data).reply().pack()),
+            stop=stop,
+            refresh=refresh,
+            ready=lambda: ready.append(True),
+            retry_source=fatal != "legacy",
+        )
+
+    if fatal:
+        expected = OSError if fatal == "publication" else DNS.Unavailable
+        with pytest.raises(expected):
+            run()
+        assert len(calls) == (1 if fatal == "initial" else 2)
+        assert len(ready) == (0 if fatal == "initial" else 1)
+    else:
+        run()
+        assert len(calls) == 6 and ready == [True]
+        assert len(answers) == 6  # Peer requests continue through repeated source failures.
+    assert len(closed) == (0 if fatal == "initial" else 2)

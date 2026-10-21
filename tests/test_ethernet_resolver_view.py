@@ -340,7 +340,12 @@ def test_main_initializes_and_refreshes_versioned_view(view, monkeypatch, tmp_pa
 
     monkeypatch.setattr(Path, "stat", root_stat)
     calls = []
-    monkeypatch.setattr(DNS, "serve", lambda resolver, refresh: refresh())
+
+    def serve(resolver, refresh, retry_source):
+        assert retry_source is True
+        refresh()
+
+    monkeypatch.setattr(DNS, "serve", serve)
     monkeypatch.setattr(DNS, "publish_config", lambda **kwargs: calls.append(kwargs))
     DNS.main()
     assert calls == [{"pod_source": host / "resolv.conf", "enrollment": e}]
