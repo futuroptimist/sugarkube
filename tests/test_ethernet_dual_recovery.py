@@ -755,6 +755,27 @@ def test_watcher_reconciles_then_prestart_consumes_once(address_recovery, monkey
     assert len(cluster.patches) == 2
 
 
+def test_dual_watcher_lease_flap_restarts_full_observation_window(address_recovery, monkeypatch):
+    cluster, voter = address_recovery
+    changed = voter.b.address()
+    now = [100.0]
+    monkeypatch.setattr(M.time, "time", lambda: now[0])
+    assert voter.watch() == "observing"
+    cluster.ips[voter.local["id"]] = voter.e["local_ipv4"]
+    now[0] = 115.0
+    assert voter.watch() == "unchanged"
+    cluster.ips[voter.local["id"]] = changed
+    now[0] = 135.0  # Old B timestamp is mature, but this B has just reappeared.
+    assert voter.watch() == "observing"
+    assert not cluster.patches and not cluster.updates and not voter.path.exists()
+    now[0] = 164.0
+    assert voter.watch() == "observing"
+    assert not cluster.patches and not voter.path.exists()
+    now[0] = 165.0
+    assert voter.watch() == "restart-requested"
+    assert len(cluster.patches) == 2
+
+
 def test_resume_preserves_unknown_membership_latch(address_recovery):
     cluster, voter = address_recovery
     incident = {

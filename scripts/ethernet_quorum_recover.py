@@ -1632,6 +1632,10 @@ class DualRecovery(Recovery):
                 "Node address journal blocks baseline return; preserve mutation outcome",
             )
         if ip == baseline:
+            if watch:
+                observation = self.path.parent / "observation.json"
+                if observation.exists():
+                    atomic_json(observation, {"ip": ip, "time": time.time()})
             if not watch:
                 self.b.network(ip)
             return "unchanged"
