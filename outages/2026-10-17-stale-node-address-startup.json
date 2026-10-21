@@ -1,0 +1,12 @@
+{
+  "id": "stale-node-address-startup-2026-10-17",
+  "date": "2026-10-17",
+  "component": "Version 2 Ethernet recovery before K3s networking startup",
+  "rootCause": "Isolated VMware Ubuntu qualification at a7dc5c6884a081301d46612cdf866492b922f92d on v1.34.5+k3s1 cold-changed q3 from .130 to .131. At 09:10:27 UTC peer connections and corruption check passed, at 09:11:07 annotations updated, and at 09:11:10 networking shut down with failed to find interface with specified node ip. Captured Node status retained .130. The constructor Node object was not captured, so the stale-status race is strongly supported rather than definitively traced. Subsequent local etcd failure followed shutdown; the consumed-start latch correctly blocked replay.",
+  "resolution": "Add a bounded version 2 surviving-control-plane gate: authenticate two original healthy survivors; validate original local Node identity and old/new address shape; conditionally reconcile annotation then status using UID/resourceVersion/prior-value tests; persist independent mutation intent and refuse uncertain replay; verify both APIs before start. Preserve membership latches. Capture an allowlisted initiating-error signature for new incidents. Offline regressions cover cold stale status, conditional conflicts, lost responses, identity drift, baseline-return latch bypass, read-only resumption and automatic watcher dispatch. Actual Ubuntu VM retest on both exact K3s versions is pending. All-member recovery remains unsupported by this gate; no agent-disabled mode or fork added.",
+  "references": [
+    "docs/ethernet-dhcp-recovery.md",
+    "tests/test_ethernet_dual_recovery.py",
+    "tests/test_ethernet_quorum_recover.py"
+  ]
+}
