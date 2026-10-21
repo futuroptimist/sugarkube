@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 from urllib.parse import urlparse
@@ -34,7 +35,22 @@ FILES = (
 )
 
 
+def relative_name(path, root):
+    """Use Linux-compatible names even when the preparation host is Windows."""
+    return path.relative_to(root).as_posix()
+
+
+def checksum_record(path, root, digest):
+    return f"{digest}  {relative_name(path, root)}\n"
+
+
+def write_utf8(path, text):
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def build(repo, commit, output):
+    if sys.version_info < (3, 11):
+        raise RuntimeError("bundle preparation requires Python 3.11 or newer")
     if not re.fullmatch(r"[0-9a-f]{40}", commit) or output.exists():
         raise ValueError("full commit SHA and a new output path required")
     resolved = subprocess.check_output(
@@ -52,10 +68,12 @@ def build(repo, commit, output):
                 subprocess.check_output(["git", "-C", str(repo), "show", f"{commit}:{name}"])
             )
         manifest = json.loads(
-            (root / "source/scripts/qualification/resolver-python-dependencies.json").read_text()
+            (root / "source/scripts/qualification/resolver-python-dependencies.json").read_text(
+                encoding="utf-8"
+            )
         )
-        (root / "python-dependencies.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        write_utf8(
+            root / "python-dependencies.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         )
         for item in manifest["packages"]:
             parsed = urlparse(item["url"])
@@ -80,7 +98,8 @@ def build(repo, commit, output):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.prepare(root, root / "deps")
-        (root / "bundle-manifest.json").write_text(
+        write_utf8(
+            root / "bundle-manifest.json",
             json.dumps(
                 {
                     "source_commit": commit,
@@ -92,28 +111,35 @@ def build(repo, commit, output):
                 indent=2,
                 sort_keys=True,
             )
-            + "\n"
+            + "\n",
         )
         # Importing the preparation helper may create bytecode: exclude it explicitly.
         import shutil
 
         for directory in root.rglob("__pycache__"):
             shutil.rmtree(directory)
-        entries = sorted(path for path in root.rglob("*") if path.is_file())
-        (root / "SHA256SUMS").write_text(
+        entries = sorted(
+            (path for path in root.rglob("*") if path.is_file()),
+            key=lambda path: relative_name(path, root),
+        )
+        write_utf8(
+            root / "SHA256SUMS",
             "".join(
-                f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}\n"
+                checksum_record(path, root, hashlib.sha256(path.read_bytes()).hexdigest())
                 for path in entries
-            )
+            ),
         )
         with output.open("xb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as compressed:
                 with tarfile.open(
                     fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT
                 ) as archive:
-                    for path in [root, *sorted(root.rglob("*"))]:
+                    for path in [
+                        root,
+                        *sorted(root.rglob("*"), key=lambda path: relative_name(path, root)),
+                    ]:
                         info = archive.gettarinfo(
-                            str(path), arcname=str(path.relative_to(root.parent))
+                            str(path), arcname=relative_name(path, root.parent)
                         )
                         info.uid = info.gid = info.mtime = 0
                         info.uname = info.gname = ""

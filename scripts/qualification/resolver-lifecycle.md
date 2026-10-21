@@ -59,7 +59,9 @@ No real guest resolver file is written or bind-mounted.
 
 No private workspace archive is required. Obtain the exact full commit SHA from
 this implementation handoff and fetch it through existing repository access.
-Do not substitute the moving branch head. Use Python 3.12 on the preparation machine:
+Do not substitute the moving branch head. Bundle preparation supports Python 3.11
+or newer, including the ESPC host's existing Python 3.11.5; no installation is needed.
+The **guest runtime remains Python 3.12**. Use the preparation host's existing Python:
 
 ```sh
 git fetch origin FULL_40_CHARACTER_COMMIT_SHA
@@ -77,6 +79,17 @@ the guest needs neither pip nor cached wheels. Tar ordering, ownership, modes,
 timestamps and gzip timestamps are normalized. With the same Python/compression
 implementation, repeated builds produce identical bytes; per-file SHA256 values
 provide the portable comparison across platforms. The manifest records the commit.
+All generated manifests use explicit UTF-8 and LF. Checksum and archive member
+names use POSIX separators and case-sensitive POSIX ordering on Windows too.
+
+This preparation-only compatibility uses standard-library APIs available in
+Python 3.11 and never imports or runs the guest's dependencies. Wheel selection
+comes directly from the fixed Linux/Python 3.12 manifest; it does not resolve
+Windows dependencies or change any pins. Regression tests cover Windows path
+rendering, explicit encoding/newlines and Python 3.11 grammar. Full local build
+execution was tested on Python 3.12; this executor has no Python 3.11 or Windows
+runtime. An actual ESPC Python 3.11.5 rebuild remains the host-specific validation,
+separate from VM execution and requiring no guest or image changes.
 
 ## Reviewed future invocation
 

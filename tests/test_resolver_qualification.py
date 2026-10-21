@@ -3,7 +3,7 @@
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 import zipfile
@@ -121,3 +121,42 @@ def test_already_removed_units_are_clean_only_with_verified_properties(monkeypat
     assert module.already_cleaned(properties)
     assert not module.already_cleaned(properties.replace("MainPID=0", "MainPID=123"))
     assert not module.already_cleaned(properties.replace("inactive", "deactivating"))
+
+
+def test_windows_preparation_names_are_linux_paths():
+    module = load("build_resolver_bundle")
+    root = PureWindowsPath(r"C:\Users\owner\bundle")
+    path = root / "source" / "scripts" / "resolver.py"
+    digest = "a" * 64
+    assert module.checksum_record(path, root, digest) == (digest + "  source/scripts/resolver.py\n")
+    assert module.relative_name(path, root.parent) == "bundle/source/scripts/resolver.py"
+
+
+def test_generated_manifest_explicitly_uses_utf8_and_lf(tmp_path):
+    module = load("build_resolver_bundle")
+    calls = []
+
+    class RecordingPath:
+        def write_text(self, text, **kwargs):
+            calls.append((text, kwargs))
+
+    text = '{"note":"café"}\n'
+    module.write_utf8(RecordingPath(), text)
+    assert calls == [(text, {"encoding": "utf-8", "newline": "\n"})]
+    target = tmp_path / "manifest.json"
+    module.write_utf8(target, text)
+    assert target.read_bytes() == text.encode("utf-8")
+
+
+def test_preparation_sources_parse_as_python_311():
+    import ast
+
+    for name in ("build_resolver_bundle", "resolver_offline_prepare"):
+        ast.parse((DIRECTORY / f"{name}.py").read_text(encoding="utf-8"), feature_version=(3, 11))
+
+
+def test_builder_rejects_older_python_before_reading_repository(tmp_path, monkeypatch):
+    module = load("build_resolver_bundle")
+    monkeypatch.setattr(module.sys, "version_info", (3, 10, 0))
+    with pytest.raises(RuntimeError, match="Python 3.11"):
+        module.build(tmp_path, "a" * 40, tmp_path / "bundle.tar.gz")

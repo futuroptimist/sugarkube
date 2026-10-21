@@ -15,7 +15,7 @@ if sys.flags.optimize:
 
 def prepare(bundle, destination):
     assert not destination.exists()
-    manifest = json.loads((bundle / "python-dependencies.json").read_text())
+    manifest = json.loads((bundle / "python-dependencies.json").read_text(encoding="utf-8"))
     wheels = []
     for item in manifest["packages"]:
         wheel = bundle / item["file"]
