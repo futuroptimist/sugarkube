@@ -542,17 +542,32 @@ def test_grpc_routes_are_limited_to_approved_operations(enrollment):
         for after in (False, True)
     ],
 )
-@pytest.mark.parametrize("schema_version", [1, 2])
+@pytest.mark.parametrize("schema_version,directory_view", [(1, False), (2, False), (2, True)])
 def test_explicit_enrollment_installs_inactive_units_only(
-    enrollment, tmp_path, monkeypatch, failure, after_write, schema_version
+    enrollment, tmp_path, monkeypatch, failure, after_write, schema_version, directory_view
 ):
     from types import SimpleNamespace
+
+    from test_ethernet_mdns_resolver import DNS
 
     enrollment["schema_version"] = schema_version
     enrollment["completion_https_urls"] = ["https://app.example/health"]
     dns_config = tmp_path / "dns-config"
-    dns_config.write_text(json.dumps({"pod_resolv_source": "/run/systemd/resolve/resolv.conf"}))
-    monkeypatch.setattr(MODULE, "sibling", lambda name: SimpleNamespace(CONFIG=dns_config))
+    config = {"pod_resolv_source": "/run/systemd/resolve/resolv.conf"}
+    if directory_view:
+        config["resolver_view"] = {
+            "kind": DNS.VIEW_KIND,
+            "symlink": "../run/systemd/resolve/stub-resolv.conf",
+            "uid": 991,
+            "gid": 991,
+        }
+        enrollment["resolver_view"] = {"kind": "untrusted-request-override"}
+    dns_config.write_text(json.dumps(config))
+    monkeypatch.setattr(
+        MODULE,
+        "sibling",
+        lambda name: SimpleNamespace(CONFIG=dns_config, view_enabled=DNS.view_enabled),
+    )
     backend = FakeBackend(enrollment)
     backend.ip = enrollment["local_ipv4"]
     inventory = {
@@ -613,7 +628,10 @@ def test_explicit_enrollment_installs_inactive_units_only(
         if path == paths["HOOK"]:
             # Simulate reboot discovery at the instant the hook becomes visible.
             assert all(paths[key].is_file() for key in paths)
-            assert json.loads(paths["ENROLLMENT"].read_text())["local_ipv4"] == "10.0.0.10"
+            captured = json.loads(paths["ENROLLMENT"].read_text())
+            assert captured["local_ipv4"] == "10.0.0.10"
+            if directory_view:
+                assert captured["resolver_view"] == config["resolver_view"]
         if failure and path == paths[failure] and after_write:
             raise OSError("injected enrollment interruption")
 
@@ -1885,3 +1903,30 @@ def test_directory_resolver_controller_guard_keeps_exact_checks(
     else:
         backend.resolver_ready()
         assert calls == ["directory", "running"]
+
+
+def test_invalid_prepared_view_stops_enrollment_before_inventory_or_writes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from test_ethernet_mdns_resolver import DNS
+
+    config = tmp_path / "dns.json"
+    config.write_text(
+        json.dumps(
+            {
+                "pod_resolv_source": "/run/systemd/resolve/resolv.conf",
+                "resolver_view": {"kind": "unsupported"},
+            }
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "sibling",
+        lambda name: SimpleNamespace(CONFIG=config, view_enabled=DNS.view_enabled),
+    )
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+    backend = SimpleNamespace(inventory=lambda: pytest.fail("invalid view reached inventory"))
+    destination = tmp_path / "enrollment.json"
+    with pytest.raises(DNS.Unavailable, match="unsupported enrolled resolver view"):
+        MODULE.enroll_checked({"schema_version": 2}, destination, backend)
+    assert not destination.exists()

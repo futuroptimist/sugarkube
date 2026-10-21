@@ -380,3 +380,43 @@ def test_optional_ipc_socket_disappearing_during_enumeration_is_safe(view, monke
     DNS.initialize_view(e)
     DNS.check_view(e)
     assert (state / "resolved/io.systemd.Resolve").is_symlink()
+
+
+@pytest.mark.parametrize("operation", ["initialize", "check"])
+def test_changed_enrolled_layout_is_refused_before_mutation(view, operation):
+    e, host, state = view
+    DNS.initialize_view(e)
+
+    def snapshot():
+        return {
+            str(p.relative_to(state)): (
+                ("link", os.readlink(p)) if p.is_symlink() else ("file", p.read_bytes())
+            )
+            for p in state.rglob("*")
+            if p.is_symlink() or p.is_file()
+        }
+
+    before = snapshot()
+    # A valid but different owner descriptor must not silently enroll the current owner.
+    changed = {**e, "resolver_view": {**e["resolver_view"], "uid": e["resolver_view"]["uid"] + 1}}
+    fn = DNS.initialize_view if operation == "initialize" else DNS.check_view
+    with pytest.raises(DNS.Unavailable, match="original resolver layout changed"):
+        fn(changed)
+    assert snapshot() == before
+
+
+def test_stable_resolver_file_disappearing_during_enumeration_is_not_ignored(view, monkeypatch):
+    e, host, state = view
+    target = host / "stub-resolv.conf"
+    lstat = Path.lstat
+
+    def vanished(path):
+        if path == target:
+            target.unlink()
+            raise FileNotFoundError(path)
+        return lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", vanished)
+    with pytest.raises(FileNotFoundError):
+        DNS.initialize_view(e)
+    assert not (state / "resolved").exists()
