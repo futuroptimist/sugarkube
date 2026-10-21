@@ -80,6 +80,11 @@ def test_early_pytest_failure_persists_result_and_runs_cleanup(tmp_path, monkeyp
     from types import SimpleNamespace
 
     module = load("resolver_lifecycle")
+    # Model the approved guest, independently of CI's floating host interpreter.
+    # Replace only this module's reference; do not mutate the process-wide sys module.
+    monkeypatch.setattr(
+        module, "sys", SimpleNamespace(version_info=(3, 12, 0), executable=sys.executable)
+    )
     monkeypatch.setattr(module, "ROOT", tmp_path / "fixture")
     monkeypatch.setattr(module.os, "geteuid", lambda: 0)
     monkeypatch.setattr(module.os, "readlink", lambda _: "../run/systemd/resolve/stub-resolv.conf")
@@ -102,6 +107,23 @@ def test_early_pytest_failure_persists_result_and_runs_cleanup(tmp_path, monkeyp
     result = json.loads(output.read_text())
     assert result["passed"] is False and result["cleanup_passed"] is True
     assert result["namespace_cases"] == 0 and "CalledProcessError" in result["error"]
+
+
+@pytest.mark.parametrize("version", [(3, 11, 5), (3, 13, 0), (3, 14, 8)])
+def test_guest_version_gate_refuses_other_interpreters_before_work(tmp_path, monkeypatch, version):
+    from types import SimpleNamespace
+
+    module = load("resolver_lifecycle")
+    monkeypatch.setattr(module, "sys", SimpleNamespace(version_info=version))
+    monkeypatch.setattr(
+        module.os, "readlink", lambda *args: pytest.fail("version gate reached host resolver")
+    )
+    monkeypatch.setattr(module, "run", lambda *args: pytest.fail("version gate reached a command"))
+    monkeypatch.setattr(module, "baseline", lambda: pytest.fail("version gate reached baseline"))
+    output = tmp_path / "result.json"
+    with pytest.raises(AssertionError):
+        module.qualify(output)
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("mismatch", ["sid", "start_ticks"])
