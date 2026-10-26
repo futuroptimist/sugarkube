@@ -31,8 +31,8 @@ Do not print, decode, paste, or commit credential files, Kubernetes Secret conte
 or raw environment dumps. Inspect only config paths, registry names, and helper
 names locally. `credHelpers`/`credsStore` may select an external credential helper;
 confirm the helper is installed and accessible before proceeding. A root process
-or another user may read a different config. No default registry file or current
-`imagePullSecret` references does **not** prove that there are no other consumers.
+or another user may read a different config. The absence of a default registry
+file or current `imagePullSecret` references does not rule out other consumers.
 Any cluster credential change needs its own reviewed procedure and authorization.
 
 ## Create the replacement with overlap
