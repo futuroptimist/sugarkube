@@ -130,10 +130,10 @@ just cf-tunnel-route host=token.place
 
 ## Troubleshooting
 
-GHCR auth and chart visibility:
+For GHCR login or PAT renewal, follow the
+[credential renewal runbook](../ghcr_authentication.md), then verify chart visibility:
 
 ```bash
-echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
 ```
 

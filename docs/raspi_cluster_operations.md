@@ -120,61 +120,21 @@ operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manual
 
 ### Authenticate Helm with OCI registries (GHCR for dspace)
 
-Sugarkube's Helm helpers (for example, `just helm-oci-install`) and newer workload docs assume you
-can pull charts directly from OCI registries such as `ghcr.io`. GitHub Container Registry (GHCR)
-requires an authenticated bearer token even for public Helm charts. Skipping authentication leads
-to errors like:
+Sugarkube's `just helm-oci-install` and `just helm-oci-upgrade` helpers use Helm;
+DSPACE's OCI preflight also uses ORAS. There is no registry login recipe, and Docker
+is not a prerequisite. Public artifacts may allow anonymous access; private
+packages require an authorized account and pull credentials.
 
-```text
-Error: failed to perform "FetchReference" on source:
-  GET "https://ghcr.io/v2/democratizedspace/charts/dspace/manifests/3.0.0":
-  GET "https://ghcr.io/token?scope=repository%3Ademocratizedspace%2Fcharts%2Fdspace%3Apull&service=ghcr.io":
-  response status code 401: unauthorized: authentication required
-```
+Follow [GHCR authentication and PAT renewal](ghcr_authentication.md) for the
+consumer inventory, classic `read:packages` PAT creation, hidden input login,
+config selection, package verification, and old-token retirement. Authenticate as
+each actual operator account that pulls charts, rather than blindly on every node.
+Helm authentication does not change Kubernetes image-pull credentials.
 
-If Helm OCI auth fails with either `401` or `403 denied: denied`, see the canonical fix flow in
-[Raspberry Pi Cluster Troubleshooting Guide — Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
-
-Authenticate once per node that will pull OCI charts:
-
-```bash
-# 1) Create a GitHub Personal Access Token with the `read:packages` scope.
-# 2) Then, on each node that will pull OCI charts:
-
-export GHCR_USERNAME="your_github_username"
-export GHCR_PAT="your_pat_with_read_packages"
-
-echo "${GHCR_PAT}" | helm registry login ghcr.io \
-  --username "${GHCR_USERNAME}" \
-  --password-stdin
-```
-
-Safety tips:
-
-- Never commit the PAT to Git. Store the exports in a root-owned file outside the repo or in a
-  private shell profile.
-- Re-run the login on each node if the PAT rotates or you rebuild the cluster.
-
-Why this matters for dspace:
-
-- The dspace Helm chart is published at `oci://ghcr.io/democratizedspace/charts/dspace` with
-  semantic versions such as `3.0.0`.
-- Commands like `helm pull oci://ghcr.io/democratizedspace/charts/dspace --version 3.0.0` and
-  `just helm-oci-install ... chart=oci://ghcr.io/democratizedspace/charts/dspace ...` require the
-  GHCR login above.
-- Once Helm and GHCR login are working, higher-level recipes such as `just helm-oci-install` can
-  be used for OCI-hosted workloads (see the workload-specific docs for full examples).
-
-Common errors:
-
-- **401 / `authentication required`:** Run `helm registry login ghcr.io` with a PAT that has the
-  `read:packages` scope.
-- **403 / `denied: denied`:** Usually an expired or wrong PAT, missing `read:packages`, stale Helm
-  GHCR login state, or package visibility mismatch. Follow
-  [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied)
-  to clear stale credentials, re-login, and verify with a direct `helm pull`.
-- **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
-  the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
+For `401` or `403 denied: denied`, also see
+[Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+A missing chart version needs a reference correction, not broader token scopes.
+Use the current version pinned in `docs/apps/dspace.version` when checking DSPACE.
 
 ## Verify Traefik ingress (k3s default)
 
@@ -424,7 +384,7 @@ Use this sequence after a **full 3-server HA rebuild** when no state was preserv
    helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version <version>
    ```
 
-   Before running this check, repeat the full login command sequence from [Authenticate Helm with OCI registries (GHCR for dspace)](#authenticate-helm-with-oci-registries-ghcr-for-dspace) so rotated credentials are definitely applied. If you hit `403 denied: denied`, follow [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+   Before running this check, follow the renewal and verification procedure linked from [Authenticate Helm with OCI registries (GHCR for dspace)](#authenticate-helm-with-oci-registries-ghcr-for-dspace) so rotated credentials are definitely applied. If you hit `403 denied: denied`, follow [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
 
 4. Use install-first semantics on fresh clusters:
 

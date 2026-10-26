@@ -53,6 +53,7 @@ Review the safety notes before working with power components.
 - [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and generic command contract
 - [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist and release decision tree for wove, jobbot3000, and later apps
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — legacy token.place-specific onboarding context
+- [ghcr_authentication.md](ghcr_authentication.md) — GHCR login, PAT renewal, consumer inventory, and read-only verification
 - [apps/dspace.md](apps/dspace.md) — DSPACE GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace.md](apps/tokenplace.md) — token.place GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI staging/prod operations guide
