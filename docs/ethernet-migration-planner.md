@@ -129,7 +129,10 @@ newline**. This differs from the compact JSON used for plan commitments.
 For offline capture preparation, `kubeconfig_inventory_digest(parsed_config)` exposes
 that same transformation as a pure Python helper. Supply a mapping parsed from an
 already captured kubeconfig using a trusted YAML parser, away from a live cluster.
-The helper returns only the digest and does not modify the supplied mapping. It reads
+The two client credential values may be replaced with nonempty synthetic placeholders
+before supplying the mapping; real client keys are not required. Preserve every other
+field exactly, including the CA, server and context. The helper returns only the digest
+and does not modify the supplied mapping. It reads
 no files, performs no TLS validation and never returns credential contents. Put the
 result in the kubeconfig observation with
 `digest_kind: k3s-kubeconfig-inventory-v1`; retain the original enrollment fingerprint
