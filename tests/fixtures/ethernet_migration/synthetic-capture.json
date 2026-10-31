@@ -2,7 +2,7 @@
   "backup": {
     "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "cluster_id": "100",
-    "enrollment_sha256": "10ea7597bb6175676c470dcc6594965e18a1675b3ef0eed333546360145fd527",
+    "enrollment_sha256": "b72e805d788d0223acfd676ab79879b875e8cbe62fa04826747c6ff8ab174e11",
     "members_sha256": "de34bb0d54867e0b3a8fbc8ddb60361a63ce17cc0dcc8ca6ad9a8572020e035b",
     "original_bundle_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "snapshot_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -11,6 +11,7 @@
   "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "directories": {
     "/": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -18,6 +19,7 @@
       "uid": 0
     },
     "/etc": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -25,6 +27,7 @@
       "uid": 0
     },
     "/etc/rancher": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -32,6 +35,7 @@
       "uid": 0
     },
     "/etc/rancher/k3s": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -39,6 +43,7 @@
       "uid": 0
     },
     "/etc/rancher/k3s/config.yaml.d": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -46,6 +51,7 @@
       "uid": 0
     },
     "/etc/systemd": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -53,6 +59,7 @@
       "uid": 0
     },
     "/etc/systemd/system": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -60,6 +67,7 @@
       "uid": 0
     },
     "/etc/systemd/system/k3s.service.d": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -67,6 +75,7 @@
       "uid": 0
     },
     "/usr": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -74,6 +83,7 @@
       "uid": 0
     },
     "/usr/local": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -81,6 +91,7 @@
       "uid": 0
     },
     "/usr/local/libexec": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -88,6 +99,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -95,6 +107,7 @@
       "uid": 0
     },
     "/var": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -102,6 +115,7 @@
       "uid": 0
     },
     "/var/lib": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -109,6 +123,7 @@
       "uid": 0
     },
     "/var/lib/rancher": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -116,6 +131,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -123,6 +139,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s/server": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -130,6 +147,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s/server/tls": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -137,6 +155,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s/server/tls/etcd": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -144,6 +163,7 @@
       "uid": 0
     },
     "/var/lib/sugarkube": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -151,6 +171,7 @@
       "uid": 0
     },
     "/var/lib/sugarkube/ethernet-recovery": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -158,7 +179,7 @@
       "uid": 0
     }
   },
-  "enrollment_json": "{\"armed\": true, \"cluster_id\": \"100\", \"completion_https_urls\": [\"https://workload.example.test\"], \"dual_enrolled\": true, \"etcd_tls\": {\"ca\": \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\", \"cert\": \"/var/lib/rancher/k3s/server/tls/etcd/client.crt\", \"key\": \"/var/lib/rancher/k3s/server/tls/etcd/client.key\"}, \"files\": {\"/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml\": \"89ee134c0a06fbfa7671649158075911bab992553c58dfb31e789550293641a5\", \"/etc/rancher/k3s/k3s.yaml\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/rancher/k3s/optional.env\": null, \"/etc/rancher/k3s/sugarkube-dns.json\": \"6ecd59ed8a280773b0cb05a084a33773026a3f1ecfb1caf77c18ab8ced3cf121\", \"/etc/rancher/k3s/sugarkube-network-prestart.sh\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf\": \"d4e72f04bff70f4759f69b8d007c00b6128df18e757e363fc5553d00624ae1c1\", \"/etc/systemd/system/sugarkube-ethernet-dns.service\": \"5260e32fcde04a03e4b780e2cb9e7f168e5932ff4450e7c565df435aa9a43066\", \"/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py\": \"eaf2ebebd081fd37d66be3c3df1d4a5a305f65d7bfc472214fc54856166b930a\", \"/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}, \"interface\": \"eth0\", \"k3s_version\": \"v1.35.4+k3s1\", \"kubeconfig\": \"/etc/rancher/k3s/k3s.yaml\", \"local_database\": {\"cluster_id\": \"100\", \"member_id\": \"1\"}, \"local_ipv4\": \"192.0.2.1\", \"local_member_id\": \"1\", \"machine_id_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"members\": [{\"hostname\": \"pi1.local\", \"id\": \"1\", \"name\": \"member1\", \"node_uid\": \"uid1\"}, {\"hostname\": \"pi2.local\", \"id\": \"2\", \"name\": \"member2\", \"node_uid\": \"uid2\"}, {\"hostname\": \"pi3.local\", \"id\": \"3\", \"name\": \"member3\", \"node_uid\": \"uid3\"}], \"pod_resolv_source\": \"/run/systemd/resolve/resolv.conf\", \"schema_version\": 2, \"systemd_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"verified_backup\": true, \"yaml_fragments\": []}",
+  "enrollment_json": "{\"armed\": true, \"cluster_id\": \"100\", \"completion_https_urls\": [\"https://workload.example.test\"], \"dual_enrolled\": true, \"etcd_tls\": {\"ca\": \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\", \"cert\": \"/var/lib/rancher/k3s/server/tls/etcd/client.crt\", \"key\": \"/var/lib/rancher/k3s/server/tls/etcd/client.key\"}, \"files\": {\"/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml\": \"89ee134c0a06fbfa7671649158075911bab992553c58dfb31e789550293641a5\", \"/etc/rancher/k3s/k3s.yaml\": \"dc8b910262b240b4734ec69ee2d31a121de3ad3d5f69d66ec1a56b5a8695794a\", \"/etc/rancher/k3s/optional.env\": null, \"/etc/rancher/k3s/sugarkube-dns.json\": \"6ecd59ed8a280773b0cb05a084a33773026a3f1ecfb1caf77c18ab8ced3cf121\", \"/etc/rancher/k3s/sugarkube-network-prestart.sh\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf\": \"d4e72f04bff70f4759f69b8d007c00b6128df18e757e363fc5553d00624ae1c1\", \"/etc/systemd/system/sugarkube-ethernet-dns.service\": \"5260e32fcde04a03e4b780e2cb9e7f168e5932ff4450e7c565df435aa9a43066\", \"/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py\": \"eaf2ebebd081fd37d66be3c3df1d4a5a305f65d7bfc472214fc54856166b930a\", \"/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}, \"interface\": \"eth0\", \"k3s_version\": \"v1.35.4+k3s1\", \"kubeconfig\": \"/etc/rancher/k3s/k3s.yaml\", \"local_database\": {\"cluster_id\": \"100\", \"member_id\": \"1\"}, \"local_ipv4\": \"192.0.2.1\", \"local_member_id\": \"1\", \"machine_id_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"members\": [{\"hostname\": \"pi1.local\", \"id\": \"1\", \"name\": \"member1\", \"node_uid\": \"uid1\"}, {\"hostname\": \"pi2.local\", \"id\": \"2\", \"name\": \"member2\", \"node_uid\": \"uid2\"}, {\"hostname\": \"pi3.local\", \"id\": \"3\", \"name\": \"member3\", \"node_uid\": \"uid3\"}], \"pod_resolv_source\": \"/run/systemd/resolve/resolv.conf\", \"schema_version\": 2, \"systemd_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"verified_backup\": true, \"yaml_fragments\": []}",
   "health": {
     "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "cluster_id": "100",
@@ -267,6 +288,7 @@
       "uid": 0
     },
     "directory": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "directory",
       "mode": 493,
@@ -275,6 +297,7 @@
     },
     "entries": {
       "io.systemd.Resolve": {
+        "digest_kind": "none",
         "gid": 0,
         "kind": "socket",
         "mode": 438,
@@ -282,6 +305,7 @@
         "uid": 0
       },
       "io.systemd.Resolve.Monitor": {
+        "digest_kind": "none",
         "gid": 0,
         "kind": "socket",
         "mode": 438,
@@ -289,6 +313,7 @@
         "uid": 0
       },
       "resolv.conf": {
+        "digest_kind": "raw-sha256",
         "gid": 0,
         "kind": "file",
         "mode": 420,
@@ -296,6 +321,7 @@
         "uid": 0
       },
       "stub-resolv.conf": {
+        "digest_kind": "raw-sha256",
         "gid": 0,
         "kind": "file",
         "mode": 420,
@@ -307,6 +333,7 @@
   },
   "observed": {
     "/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -314,13 +341,15 @@
       "uid": 0
     },
     "/etc/rancher/k3s/k3s.yaml": {
+      "digest_kind": "k3s-kubeconfig-inventory-v1",
       "gid": 0,
       "kind": "file",
       "mode": 420,
-      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "sha256": "dc8b910262b240b4734ec69ee2d31a121de3ad3d5f69d66ec1a56b5a8695794a",
       "uid": 0
     },
     "/etc/rancher/k3s/optional.env": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "absent",
       "mode": 420,
@@ -328,6 +357,7 @@
       "uid": 0
     },
     "/etc/rancher/k3s/sugarkube-dns.json": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -335,6 +365,7 @@
       "uid": 0
     },
     "/etc/rancher/k3s/sugarkube-network-prestart.sh": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -342,6 +373,7 @@
       "uid": 0
     },
     "/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -349,6 +381,7 @@
       "uid": 0
     },
     "/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -356,6 +389,7 @@
       "uid": 0
     },
     "/etc/systemd/system/k3s.service.d/30-sugarkube-quorum-recovery.conf": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -363,6 +397,7 @@
       "uid": 0
     },
     "/etc/systemd/system/sugarkube-ethernet-dns.service": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -370,6 +405,7 @@
       "uid": 0
     },
     "/etc/systemd/system/sugarkube-ethernet-recovery.service": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -377,6 +413,7 @@
       "uid": 0
     },
     "/etc/systemd/system/sugarkube-ethernet-recovery.timer": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -384,6 +421,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube/ethernet-etcd.desc": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -391,6 +429,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube/ethernet-quorum-recover.py": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -398,6 +437,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube/ethernet_etcd_grpc.py": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -405,6 +445,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -412,6 +453,7 @@
       "uid": 0
     },
     "/usr/local/libexec/sugarkube/ethernet_wal_identity.py": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -419,6 +461,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -426,6 +469,7 @@
       "uid": 0
     },
     "/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -442,13 +486,15 @@
   "source_revision": "1a9e767257e65470d6c7e732240b592500b6ac46",
   "state_metadata": {
     "/etc/rancher/k3s/sugarkube-recovery.json": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
-      "sha256": "10ea7597bb6175676c470dcc6594965e18a1675b3ef0eed333546360145fd527",
+      "sha256": "b72e805d788d0223acfd676ab79879b875e8cbe62fa04826747c6ff8ab174e11",
       "uid": 0
     },
     "/var/lib/sugarkube/ethernet-recovery/incident.json": {
+      "digest_kind": "raw-sha256",
       "gid": 0,
       "kind": "file",
       "mode": 420,
@@ -456,6 +502,7 @@
       "uid": 0
     },
     "/var/lib/sugarkube/ethernet-recovery/node-address.json": {
+      "digest_kind": "none",
       "gid": 0,
       "kind": "absent",
       "mode": 420,

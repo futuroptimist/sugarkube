@@ -2,6 +2,7 @@
 """Offline admission of captured evidence; no host discovery or migration executor."""
 
 import argparse
+import copy
 import hashlib
 import ipaddress
 import json
@@ -13,6 +14,7 @@ from urllib.parse import urlsplit
 CATALOG = Path(__file__).with_name("migration") / "resolver-v1-to-directory-v1.json"
 CATALOG_SHA256 = "d3ba2e70b88cc82e356a0e879d9c8a50fcb30fa69e327efe25aa45dc804f27a9"
 CONFIG = "/etc/rancher/k3s/sugarkube-dns.json"
+KUBECONFIG_DIGEST_KIND = "k3s-kubeconfig-inventory-v1"
 VIEW = {"kind": "resolved-stub-directory-v1", "symlink": "../run/systemd/resolve/stub-resolv.conf"}
 ENROLLMENT_KEYS = set(
     (
@@ -86,6 +88,47 @@ def parse(raw):
         raise Refused("invalid or ambiguous JSON") from exc
 
 
+def kubeconfig_inventory_digest(config):
+    """Hash a supplied parsed kubeconfig using historical inventory semantics.
+
+    This pure capture-preparation helper never reads YAML, credentials or host paths.
+    Its caller supplies a mapping parsed offline; no contents are returned or logged.
+    The original mapping is unchanged. This is not a certificate/TLS validation.
+    """
+    try:
+        config = copy.deepcopy(config)
+        require(
+            len(config["clusters"]) == len(config["contexts"]) == 1,
+            "one explicit API trust context required",
+        )
+        cluster = config["clusters"][0]
+        context = config["contexts"][0]
+        require(
+            set(cluster["cluster"]) == {"server", "certificate-authority-data"}
+            and cluster["cluster"]["certificate-authority-data"]
+            and config["current-context"] == context["name"]
+            and context["context"]["cluster"] == cluster["name"],
+            "unsupported kubeconfig trust context",
+        )
+        require(
+            len(config["users"]) == 1 and context["context"]["user"] == config["users"][0]["name"],
+            "unsupported kubeconfig user context",
+        )
+        user = config["users"][0]["user"]
+        require(
+            set(user) == {"client-certificate-data", "client-key-data"}
+            and all(isinstance(value, str) and value for value in user.values()),
+            "unsupported kubeconfig credential layout",
+        )
+        config["users"][0]["user"] = {key: "rotating-client-credential" for key in user}
+        # Preserve the historical default separators and absence of a trailing newline.
+        return sha(json.dumps(config, sort_keys=True, allow_nan=False).encode())
+    except Refused:
+        raise
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
+        raise Refused("malformed supplied kubeconfig mapping") from exc
+
+
 def artifacts(catalog, enrollment, label, view):
     """Render only pinned literals and the historical sorted JSON config format."""
     entry = catalog["artifacts"][label]
@@ -103,8 +146,16 @@ def artifacts(catalog, enrollment, label, view):
     return result
 
 
-def metadata(record, expected, kind="file", uid=0, gid=0):
-    shape(record, {"kind", "uid", "gid", "mode", "sha256"}, "missing or ambiguous file metadata")
+def metadata(record, expected, kind="file", uid=0, gid=0, digest_kind="raw-sha256"):
+    shape(
+        record,
+        {"kind", "uid", "gid", "mode", "sha256", "digest_kind"},
+        "missing or ambiguous file metadata",
+    )
+    require(
+        record["digest_kind"] == ("none" if expected is None else digest_kind),
+        "wrong fingerprint semantics",
+    )
     require(
         record["kind"] == kind
         and type(record["uid"]) is int
@@ -326,7 +377,12 @@ def _admit(bundle, catalog):
     directories = {str(parent) for p in state_files for parent in PurePosixPath(p).parents}
     for path, digest in expected.items():
         directories.update(str(p) for p in PurePosixPath(path).parents)
-        metadata(bundle["observed"][path], digest, "absent" if digest is None else "file")
+        metadata(
+            bundle["observed"][path],
+            digest,
+            "absent" if digest is None else "file",
+            digest_kind=KUBECONFIG_DIGEST_KIND if path == e["kubeconfig"] else "raw-sha256",
+        )
     shape(bundle["directories"], directories, "incomplete parent metadata")
     for record in bundle["directories"].values():
         metadata(record, None, "directory")

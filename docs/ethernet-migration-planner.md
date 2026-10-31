@@ -71,7 +71,10 @@ refusals. Unknown keys, duplicate JSON keys, missing records and type drift are 
   SHA256 identifier for one coherent capture. It must agree across health and backup
   records; this is a consistency check, not a signature or freshness guarantee.
 - `observed` must cover exactly every enrollment fingerprint and pinned owned artifact.
-  Records contain `kind`, numeric `uid`, `gid`, permission `mode` and `sha256`. Optional
+  Records contain `kind`, numeric `uid`, `gid`, permission `mode`, `sha256` and
+  `digest_kind`. The digest tag is mandatory in all metadata records: `raw-sha256`
+  for ordinary file bytes, `k3s-kubeconfig-inventory-v1` for the enrolled kubeconfig
+  inventory fingerprint, and `none` where no content digest exists. Optional
   missing files use `kind: absent` and a null digest. Their root ownership and safe mode
   fields describe the intended entry policy; the separate parent records describe the
   captured existing directories. Present files must be regular, owned by root, and not
@@ -111,6 +114,36 @@ to preserved fields/fingerprints and journal text by digest without emitting raw
 trust material, unrelated file paths or configuration contents. Canonical output hashes
 use UTF-8 sorted compact JSON, without a trailing newline. Input order of object keys does
 not affect the plan; exact embedded enrollment and journal bytes intentionally do.
+
+### Kubeconfig inventory fingerprint
+
+The historical source controller does **not** fingerprint the raw kubeconfig file.
+Do not use `sha256sum` of that file for its `observed.sha256` value. In
+`Backend.inventory()` at the pinned source revision, it parses YAML, verifies one
+explicit CA/context/user and inline client certificate/key fields, then replaces only
+`users[0].user.client-certificate-data` and `users[0].user.client-key-data` with the
+literal `rotating-client-credential`. It hashes UTF-8
+`json.dumps(config, sort_keys=True)` using default JSON separators and **no trailing
+newline**. This differs from the compact JSON used for plan commitments.
+
+For offline capture preparation, `kubeconfig_inventory_digest(parsed_config)` exposes
+that same transformation as a pure Python helper. Supply a mapping parsed from an
+already captured kubeconfig using a trusted YAML parser, away from a live cluster.
+The helper returns only the digest and does not modify the supplied mapping. It reads
+no files, performs no TLS validation and never returns credential contents. Put the
+result in the kubeconfig observation with
+`digest_kind: k3s-kubeconfig-inventory-v1`; retain the original enrollment fingerprint
+unchanged. Do not add the parsed kubeconfig or any credentials to the evidence bundle
+or plan output. No live collection command is provided.
+
+Native rotation of the two client credential values therefore retains the fingerprint.
+Changes to the CA, server, context or any other retained field change the fingerprint
+and must refuse admission. The synthetic capture's kubeconfig digest is derived from
+an explicitly synthetic mapping in the tests; regressions verify rotation stability,
+trust-change refusal, serialization details and rejection of raw-file digest tags.
+Other observed file hashes remain raw-byte SHA256 values, including resolver config
+JSON with its historical trailing newline. Missing entries, directories and sockets
+use a null digest and `digest_kind: none`.
 
 ## Remaining gates
 

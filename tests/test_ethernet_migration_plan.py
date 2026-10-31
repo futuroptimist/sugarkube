@@ -19,8 +19,43 @@ SPEC.loader.exec_module(M)
 FIXTURES = ROOT / "tests/fixtures/ethernet_migration"
 
 
-def record(digest=None, kind="file", mode=0o644):
-    return {"sha256": digest, "kind": kind, "uid": 0, "gid": 0, "mode": mode}
+def record(digest=None, kind="file", mode=0o644, digest_kind="raw-sha256"):
+    return {
+        "sha256": digest,
+        "digest_kind": "none" if digest is None else digest_kind,
+        "kind": kind,
+        "uid": 0,
+        "gid": 0,
+        "mode": mode,
+    }
+
+
+def synthetic_kubeconfig():
+    return {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "preferences": {},
+        "clusters": [
+            {
+                "name": "default",
+                "cluster": {
+                    "server": "https://127.0.0.1:6443",
+                    "certificate-authority-data": "synthetic-ca",
+                },
+            }
+        ],
+        "contexts": [{"name": "default", "context": {"cluster": "default", "user": "default"}}],
+        "current-context": "default",
+        "users": [
+            {
+                "name": "default",
+                "user": {
+                    "client-certificate-data": "synthetic-certificate-A",
+                    "client-key-data": "synthetic-private-material-A",
+                },
+            }
+        ],
+    }
 
 
 def sample():
@@ -75,6 +110,7 @@ def sample():
     ]:
         e["files"][path] = "c" * 64
     e["files"]["/etc/rancher/k3s/optional.env"] = None
+    e["files"][e["kubeconfig"]] = M.kubeconfig_inventory_digest(synthetic_kubeconfig())
     members = {}
     for member in e["members"]:
         mid = member["id"]
@@ -119,7 +155,11 @@ def sample():
         "/var/lib/sugarkube/ethernet-recovery/node-address.json": record(None, "absent"),
     }
     observed = {
-        p: record(h, "absent" if h is None else "file")
+        p: record(
+            h,
+            "absent" if h is None else "file",
+            digest_kind=M.KUBECONFIG_DIGEST_KIND if p == e["kubeconfig"] else "raw-sha256",
+        )
         for p, h in {**e["files"], **artifacts}.items()
     }
     parents = {str(parent) for p in {*observed, *state} for parent in Path(p).parents}
@@ -563,3 +603,101 @@ def test_file_entrypoint_preserves_capture(evidence, tmp_path, monkeypatch, caps
     assert json.loads(capsys.readouterr().out) == M.plan(evidence)
     assert source.read_bytes() == before
     assert list(tmp_path.iterdir()) == [source]
+
+
+def test_kubeconfig_inventory_normalizes_only_rotating_leaves(evidence):
+    config = synthetic_kubeconfig()
+    original = copy.deepcopy(config)
+    normalized = copy.deepcopy(config)
+    normalized["users"][0]["user"] = {
+        "client-certificate-data": "rotating-client-credential",
+        "client-key-data": "rotating-client-credential",
+    }
+    expected_bytes = json.dumps(normalized, sort_keys=True).encode()
+    digest = M.kubeconfig_inventory_digest(config)
+    assert digest == M.sha(expected_bytes)
+    assert digest != M.sha(M.canonical(normalized))
+    assert digest != M.sha(expected_bytes + b"\n")
+    assert digest != M.sha(json.dumps(config, sort_keys=True).encode())
+    assert config == original
+    config["users"][0]["user"] = {
+        "client-certificate-data": "synthetic-certificate-B",
+        "client-key-data": "synthetic-private-material-B",
+    }
+    assert M.kubeconfig_inventory_digest(config) == digest
+    e = M.parse(evidence["enrollment_json"])
+    assert e["files"][e["kubeconfig"]] == digest
+    result = M.plan(evidence)
+    assert e["kubeconfig"] not in {t["path"] for t in result["transitions"]}
+    for material in original["users"][0]["user"].values():
+        assert material not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("server", "https://replacement.example.test:6443"),
+        ("certificate-authority-data", "replacement-ca"),
+    ],
+)
+def test_kubeconfig_trust_changes_remain_pinned(evidence, field, value):
+    config = synthetic_kubeconfig()
+    config["clusters"][0]["cluster"][field] = value
+    e = M.parse(evidence["enrollment_json"])
+    evidence["observed"][e["kubeconfig"]]["sha256"] = M.kubeconfig_inventory_digest(config)
+    with pytest.raises(M.Refused, match="modified or missing"):
+        M.plan(evidence)
+
+
+@pytest.mark.parametrize("kind", ["raw-sha256", "unknown", None])
+def test_kubeconfig_digest_semantics_are_explicit(evidence, kind):
+    path = M.parse(evidence["enrollment_json"])["kubeconfig"]
+    evidence["observed"][path]["digest_kind"] = kind
+    with pytest.raises(M.Refused, match="fingerprint semantics"):
+        M.plan(evidence)
+
+
+def test_raw_kubeconfig_hash_is_not_an_inventory_fingerprint(evidence):
+    path = M.parse(evidence["enrollment_json"])["kubeconfig"]
+    evidence["observed"][path]["sha256"] = M.sha(json.dumps(synthetic_kubeconfig()).encode())
+    with pytest.raises(M.Refused, match="modified or missing"):
+        M.plan(evidence)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "multiple-contexts",
+        "trust-override",
+        "wrong-context",
+        "wrong-user",
+        "missing-users",
+        "external-credentials",
+        "empty-credential",
+        "not-json",
+    ],
+)
+def test_kubeconfig_helper_refuses_unsupported_input_without_disclosure(damage):
+    config = synthetic_kubeconfig()
+    if damage == "missing":
+        del config["clusters"]
+    elif damage == "multiple-contexts":
+        config["contexts"].append(copy.deepcopy(config["contexts"][0]))
+    elif damage == "trust-override":
+        config["clusters"][0]["cluster"]["insecure-skip-tls-verify"] = True
+    elif damage == "wrong-context":
+        config["current-context"] = "private-material"
+    elif damage == "wrong-user":
+        config["contexts"][0]["context"]["user"] = "private-material"
+    elif damage == "missing-users":
+        config["users"] = []
+    elif damage == "external-credentials":
+        config["users"][0]["user"] = {"client-key": "/private-material"}
+    elif damage == "empty-credential":
+        config["users"][0]["user"]["client-key-data"] = ""
+    else:
+        config["preferences"] = object()
+    with pytest.raises(M.Refused) as result:
+        M.kubeconfig_inventory_digest(config)
+    assert "private-material" not in str(result.value)
