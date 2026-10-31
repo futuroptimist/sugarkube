@@ -163,6 +163,7 @@ def sample():
         for p, h in {**e["files"], **artifacts}.items()
     }
     parents = {str(parent) for p in {*observed, *state} for parent in Path(p).parents}
+    parents.update({"/run", "/run/systemd"})
     digest = M.sha(M.canonical(members))
     return {
         "schema_version": 1,
@@ -325,6 +326,8 @@ def test_known_rendered_bytes(label, evidence):
         (("layout", "entries", "resolv.conf", "mode"), 0o666),
         (("layout", "directory", "mode"), 0o777),
         (("directories", "/etc", "kind"), "symlink"),
+        (("directories", "/run/systemd", "kind"), "symlink"),
+        (("directories", "/run", "uid"), 1000),
         (("directories", "/etc", "uid"), 1000),
         (("observed", M.CONFIG, "sha256"), "b" * 64),
         (("observed", M.CONFIG, "kind"), "absent"),

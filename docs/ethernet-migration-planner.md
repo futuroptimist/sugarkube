@@ -80,7 +80,8 @@ refusals. Unknown keys, duplicate JSON keys, missing records and type drift are 
   captured existing directories. Present files must be regular, owned by root, and not
   writable by group or others. Symlinks, missing owned files and changed hooks refuse.
 - `directories` must cover every ancestor, including `/`, of the captured artifact and
-  state paths. Each must be a root-owned directory with a safe mode. Paths must be
+  state paths, plus `/run` and `/run/systemd` above the original resolved directory.
+  Each must be a root-owned directory with a safe mode. Paths must be
   absolute and canonical; aliases and dot segments refuse. `state_metadata` separately
   binds the exact enrollment and journal text to captured regular-file metadata and
   records the absent Node-address journal at the standard state path.

@@ -74,6 +74,22 @@
       "sha256": null,
       "uid": 0
     },
+    "/run": {
+      "digest_kind": "none",
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/run/systemd": {
+      "digest_kind": "none",
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
     "/usr": {
       "digest_kind": "none",
       "gid": 0,

@@ -375,6 +375,7 @@ def _admit(bundle, catalog):
     expected = {**e["files"], **old}
     shape(bundle["observed"], expected, "incomplete or extra captured file inventory")
     directories = {str(parent) for p in state_files for parent in PurePosixPath(p).parents}
+    directories.update({"/run", "/run/systemd"})
     for path, digest in expected.items():
         directories.update(str(p) for p in PurePosixPath(path).parents)
         metadata(
