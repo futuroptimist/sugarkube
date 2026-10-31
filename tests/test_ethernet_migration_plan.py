@@ -541,3 +541,25 @@ def test_cli_size_limit(monkeypatch, capsys):
     )
     assert M.main(["-"]) == 2
     assert "size limit" in capsys.readouterr().out
+
+
+def test_malformed_nested_evidence_is_redacted(evidence):
+    evidence["layout"]["entries"]["resolv.conf"] = None
+    with pytest.raises(M.Refused, match="malformed or unsupported captured evidence"):
+        M.plan(evidence)
+
+
+def test_file_entrypoint_preserves_capture(evidence, tmp_path, monkeypatch, capsys):
+    import runpy
+
+    source = tmp_path / "capture.json"
+    source.write_text(json.dumps(evidence))
+    before = source.read_bytes()
+    script = ROOT / "scripts/ethernet_migration_plan.py"
+    monkeypatch.setattr(M.sys, "argv", [str(script), str(source)])
+    with pytest.raises(SystemExit) as result:
+        runpy.run_path(str(script), run_name="__main__")
+    assert result.value.code == 0
+    assert json.loads(capsys.readouterr().out) == M.plan(evidence)
+    assert source.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [source]
