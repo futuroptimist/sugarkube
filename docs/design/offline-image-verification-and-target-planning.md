@@ -374,6 +374,14 @@ under the applicable handoff rules. Establish backups and boot recovery before w
 bytes on the same bound handle and qualify actual boot behavior afterward. No design approval or
 passing synthetic fixture grants this authority.
 
+## Documentation provenance
+
+Repository agent instructions, the Docs workflow and check tooling describe the documentation
+validation process. [S6](#s6) [S7](#s7) [S8](#s8) The Test Suite and CI workflows provide broader
+validation context; citing them does not claim they were run for this design. [S11](#s11) [S12](#s12)
+The documentation index, ARM64 build design and repository metadata provide project context.
+[S16](#s16)
+
 ## Sources
 
 All repository citations below use the reviewed main commit
