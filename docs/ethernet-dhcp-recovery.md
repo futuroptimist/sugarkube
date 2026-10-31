@@ -536,6 +536,10 @@ occupy the resolver's workers.
 
 #### Existing enrollment migration boundary
 
+The separate [offline migration planner](ethernet-migration-planner.md) validates supplied
+captures and emits a read-only plan for one pinned historical transition. It does not
+authorize or execute migration, attest current safety, or change the guards below.
+
 The runtime-only replacement instructions above apply to the earlier bounded Node-address
 change through `1a9e7672`, **not** to this resolver-mount change. This change deliberately
 does not provide an automatic in-place migration command. `prepare-resolver` still refuses

@@ -1,0 +1,466 @@
+{
+  "backup": {
+    "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "cluster_id": "100",
+    "enrollment_sha256": "10ea7597bb6175676c470dcc6594965e18a1675b3ef0eed333546360145fd527",
+    "members_sha256": "de34bb0d54867e0b3a8fbc8ddb60361a63ce17cc0dcc8ca6ad9a8572020e035b",
+    "original_bundle_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "snapshot_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "verified": true
+  },
+  "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "directories": {
+    "/": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/rancher": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/rancher/k3s": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/rancher/k3s/config.yaml.d": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/systemd": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/systemd/system": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/systemd/system/k3s.service.d": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/usr": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/usr/local": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/usr/local/libexec": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/rancher": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s/server": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s/server/tls": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s/server/tls/etcd": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/sugarkube": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "/var/lib/sugarkube/ethernet-recovery": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    }
+  },
+  "enrollment_json": "{\"armed\": true, \"cluster_id\": \"100\", \"completion_https_urls\": [\"https://workload.example.test\"], \"dual_enrolled\": true, \"etcd_tls\": {\"ca\": \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\", \"cert\": \"/var/lib/rancher/k3s/server/tls/etcd/client.crt\", \"key\": \"/var/lib/rancher/k3s/server/tls/etcd/client.key\"}, \"files\": {\"/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml\": \"89ee134c0a06fbfa7671649158075911bab992553c58dfb31e789550293641a5\", \"/etc/rancher/k3s/k3s.yaml\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/rancher/k3s/optional.env\": null, \"/etc/rancher/k3s/sugarkube-dns.json\": \"6ecd59ed8a280773b0cb05a084a33773026a3f1ecfb1caf77c18ab8ced3cf121\", \"/etc/rancher/k3s/sugarkube-network-prestart.sh\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf\": \"d4e72f04bff70f4759f69b8d007c00b6128df18e757e363fc5553d00624ae1c1\", \"/etc/systemd/system/sugarkube-ethernet-dns.service\": \"5260e32fcde04a03e4b780e2cb9e7f168e5932ff4450e7c565df435aa9a43066\", \"/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py\": \"eaf2ebebd081fd37d66be3c3df1d4a5a305f65d7bfc472214fc54856166b930a\", \"/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}, \"interface\": \"eth0\", \"k3s_version\": \"v1.35.4+k3s1\", \"kubeconfig\": \"/etc/rancher/k3s/k3s.yaml\", \"local_database\": {\"cluster_id\": \"100\", \"member_id\": \"1\"}, \"local_ipv4\": \"192.0.2.1\", \"local_member_id\": \"1\", \"machine_id_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"members\": [{\"hostname\": \"pi1.local\", \"id\": \"1\", \"name\": \"member1\", \"node_uid\": \"uid1\"}, {\"hostname\": \"pi2.local\", \"id\": \"2\", \"name\": \"member2\", \"node_uid\": \"uid2\"}, {\"hostname\": \"pi3.local\", \"id\": \"3\", \"name\": \"member3\", \"node_uid\": \"uid3\"}], \"pod_resolv_source\": \"/run/systemd/resolve/resolv.conf\", \"schema_version\": 2, \"systemd_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"verified_backup\": true, \"yaml_fragments\": []}",
+  "health": {
+    "capture_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "cluster_id": "100",
+    "lock_absent": true,
+    "members": {
+      "1": {
+        "annotation_ip": "192.0.2.1",
+        "hostname": "pi1.local",
+        "internal_ip": "192.0.2.1",
+        "ipv4": "192.0.2.1",
+        "learner": false,
+        "marker_sha256": "33ea971099d69c7ac248d73cbb2c584d1149ade5be047883a54390de4f4ba758",
+        "name": "member1",
+        "node_name": "pi1",
+        "node_uid": "uid1",
+        "peer_urls": [
+          "https://192.0.2.1:2380",
+          "https://pi1.local:2380"
+        ],
+        "ready": true
+      },
+      "2": {
+        "annotation_ip": "192.0.2.2",
+        "hostname": "pi2.local",
+        "internal_ip": "192.0.2.2",
+        "ipv4": "192.0.2.2",
+        "learner": false,
+        "marker_sha256": "2ede1641903eaee3f828d2152b2de1a36a57183aabb5764ad18215703b7ad021",
+        "name": "member2",
+        "node_name": "pi2",
+        "node_uid": "uid2",
+        "peer_urls": [
+          "https://192.0.2.2:2380",
+          "https://pi2.local:2380"
+        ],
+        "ready": true
+      },
+      "3": {
+        "annotation_ip": "192.0.2.3",
+        "hostname": "pi3.local",
+        "internal_ip": "192.0.2.3",
+        "ipv4": "192.0.2.3",
+        "learner": false,
+        "marker_sha256": "afe2460082b9c3f4bd2c7284e5d3957fa7ab12ae6fb96a0b4a022c41c0a4681b",
+        "name": "member3",
+        "node_name": "pi3",
+        "node_uid": "uid3",
+        "peer_urls": [
+          "https://192.0.2.3:2380",
+          "https://pi3.local:2380"
+        ],
+        "ready": true
+      }
+    },
+    "responders": {
+      "1": {
+        "api_verified": true,
+        "cluster_id": "100",
+        "linearizable_read": true,
+        "member_id": "1",
+        "members_sha256": "de34bb0d54867e0b3a8fbc8ddb60361a63ce17cc0dcc8ca6ad9a8572020e035b",
+        "membership_intent": "none",
+        "node_address_intent": "none",
+        "peer_tls_verified": true
+      },
+      "2": {
+        "api_verified": true,
+        "cluster_id": "100",
+        "linearizable_read": true,
+        "member_id": "2",
+        "members_sha256": "de34bb0d54867e0b3a8fbc8ddb60361a63ce17cc0dcc8ca6ad9a8572020e035b",
+        "membership_intent": "none",
+        "node_address_intent": "none",
+        "peer_tls_verified": true
+      },
+      "3": {
+        "api_verified": true,
+        "cluster_id": "100",
+        "linearizable_read": true,
+        "member_id": "3",
+        "members_sha256": "de34bb0d54867e0b3a8fbc8ddb60361a63ce17cc0dcc8ca6ad9a8572020e035b",
+        "membership_intent": "none",
+        "node_address_intent": "none",
+        "peer_tls_verified": true
+      }
+    }
+  },
+  "identity": {
+    "k3s_version": "v1.35.4+k3s1",
+    "local_database": {
+      "cluster_id": "100",
+      "member_id": "1"
+    },
+    "machine_id_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "systemd_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "journals": {
+    "incident_json": "{\"cluster_id\": \"100\", \"created_at\": 1, \"ip\": \"192.0.2.1\", \"kind\": \"enrollment\", \"member_id\": \"1\", \"mutation_dispatched\": false, \"old_peer_urls\": [\"https://192.0.2.1:2380\", \"https://pi1.local:2380\"], \"phase\": \"complete\", \"token\": \"d1c017dc10f3addf08acf99f4b580d2e\", \"transport\": \"not-needed\"}",
+    "node_address_json": null
+  },
+  "layout": {
+    "descriptor": {
+      "gid": 0,
+      "kind": "resolved-stub-directory-v1",
+      "symlink": "../run/systemd/resolve/stub-resolv.conf",
+      "uid": 0
+    },
+    "directory": {
+      "gid": 0,
+      "kind": "directory",
+      "mode": 493,
+      "sha256": null,
+      "uid": 0
+    },
+    "entries": {
+      "io.systemd.Resolve": {
+        "gid": 0,
+        "kind": "socket",
+        "mode": 438,
+        "sha256": null,
+        "uid": 0
+      },
+      "io.systemd.Resolve.Monitor": {
+        "gid": 0,
+        "kind": "socket",
+        "mode": 438,
+        "sha256": null,
+        "uid": 0
+      },
+      "resolv.conf": {
+        "gid": 0,
+        "kind": "file",
+        "mode": 420,
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "uid": 0
+      },
+      "stub-resolv.conf": {
+        "gid": 0,
+        "kind": "file",
+        "mode": 420,
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "uid": 0
+      }
+    },
+    "runtime_view_absent": true
+  },
+  "observed": {
+    "/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "89ee134c0a06fbfa7671649158075911bab992553c58dfb31e789550293641a5",
+      "uid": 0
+    },
+    "/etc/rancher/k3s/k3s.yaml": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "uid": 0
+    },
+    "/etc/rancher/k3s/optional.env": {
+      "gid": 0,
+      "kind": "absent",
+      "mode": 420,
+      "sha256": null,
+      "uid": 0
+    },
+    "/etc/rancher/k3s/sugarkube-dns.json": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "6ecd59ed8a280773b0cb05a084a33773026a3f1ecfb1caf77c18ab8ced3cf121",
+      "uid": 0
+    },
+    "/etc/rancher/k3s/sugarkube-network-prestart.sh": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "uid": 0
+    },
+    "/etc/systemd/system/k3s.service.d/20-sugarkube-network.conf": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "uid": 0
+    },
+    "/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "d4e72f04bff70f4759f69b8d007c00b6128df18e757e363fc5553d00624ae1c1",
+      "uid": 0
+    },
+    "/etc/systemd/system/k3s.service.d/30-sugarkube-quorum-recovery.conf": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "2864fdbf4d0b6742a6bb5240f56ea6c62832f577ed4ed6acd14a80faf49f5799",
+      "uid": 0
+    },
+    "/etc/systemd/system/sugarkube-ethernet-dns.service": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "5260e32fcde04a03e4b780e2cb9e7f168e5932ff4450e7c565df435aa9a43066",
+      "uid": 0
+    },
+    "/etc/systemd/system/sugarkube-ethernet-recovery.service": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "2e6cc2a243e816e1538abe8e6c816781abacd251c607ca39868b45c3b1f3854b",
+      "uid": 0
+    },
+    "/etc/systemd/system/sugarkube-ethernet-recovery.timer": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "703af850246c89633f6708ee097dd84a6f524c02d0ae118551cf660a7c48a847",
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube/ethernet-etcd.desc": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "4ff408bd7b84e57c41b0504831efe7c4d16eb9a27ecd06d970dd55a85f67ff9d",
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube/ethernet-quorum-recover.py": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "51f4a7015bc81fd0ea5f58677f6f97ef2d4ac5beab1181d3eb66f83f9ab5558c",
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube/ethernet_etcd_grpc.py": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "aa96cbd77eeb0ab123bf4b1c0c666ea44c891098707974447a3800392e01a28a",
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "eaf2ebebd081fd37d66be3c3df1d4a5a305f65d7bfc472214fc54856166b930a",
+      "uid": 0
+    },
+    "/usr/local/libexec/sugarkube/ethernet_wal_identity.py": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "acba65c505fe6b9b60b3f5a8d6c05f9014c666bfc7ebcc64a08579207cc524d1",
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s/server/tls/etcd/peer-ca.crt": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "uid": 0
+    },
+    "/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "uid": 0
+    }
+  },
+  "quiescence": {
+    "controller_idle": true,
+    "mutation_state": "none",
+    "timer_paused": true
+  },
+  "schema_version": 1,
+  "source_revision": "1a9e767257e65470d6c7e732240b592500b6ac46",
+  "state_metadata": {
+    "/etc/rancher/k3s/sugarkube-recovery.json": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "10ea7597bb6175676c470dcc6594965e18a1675b3ef0eed333546360145fd527",
+      "uid": 0
+    },
+    "/var/lib/sugarkube/ethernet-recovery/incident.json": {
+      "gid": 0,
+      "kind": "file",
+      "mode": 420,
+      "sha256": "addbc7ff72c27267df74973559c1b7fce875c370ae1d33c7adf9d1fd0191b1bb",
+      "uid": 0
+    },
+    "/var/lib/sugarkube/ethernet-recovery/node-address.json": {
+      "gid": 0,
+      "kind": "absent",
+      "mode": 420,
+      "sha256": null,
+      "uid": 0
+    }
+  }
+}
