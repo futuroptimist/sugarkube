@@ -372,7 +372,7 @@ def _verify_setup(
     if legacy_310:
         manifest_path = legacy_310_manifest(tmp_path)
     elif legacy:
-        manifest_path = recovery_manifest(tmp_path)
+        manifest_path = recovery_manifest(tmp_path, **(coordinates or {}))
     elif coordinates is not None:
         manifest_path = tmp_path / "selected-coordinates.json"
         manifest_path.write_text(
@@ -2024,3 +2024,39 @@ def test_tag_only_runtime_exception_is_limited_to_exact_recovery_preflight(
     else:
         with pytest.raises(verifier.VerificationError, match="legacy recovery identity"):
             verifier.verify(args)
+
+
+@pytest.mark.parametrize("field", list(verifier.HOTFIX_302_COORDINATES))
+def test_hotfix_coordinate_drift_never_selects_legacy(field: str) -> None:
+    value = dict(verifier.HOTFIX_302_COORDINATES)
+    value[field] = "drift"
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+@pytest.mark.parametrize(
+    "overrides, failure",
+    [
+        ({}, None),
+        ({"direct_meta": {"dspace-1": "{}"}}, "direct identity"),
+        ({"public_meta": "{}"}, "public identity"),
+        ({"direct_meta": {"dspace-2": '{"gitSha":"wrong"}'}}, "direct identity"),
+    ],
+)
+def test_hotfix_build_meta_contract(monkeypatch, tmp_path, overrides, failure) -> None:
+    args, seen = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        legacy=True,
+        provider="openai",
+        coordinates=verifier.HOTFIX_302_COORDINATES,
+        overrides=overrides,
+    )
+    if failure:
+        with pytest.raises(verifier.VerificationError, match=failure):
+            verifier.verify(args)
+        return
+    result = verifier.verify(args)
+    assert result["runtimeSourceRevision"] == verifier.HOTFIX_302_COORDINATES["sourceRevision"]
+    assert result["journeys"][0] == {"name": "/build-meta.json", "passed": True}
+    assert seen[-1][seen[-1].index("--identity-contract") + 1] == verifier.LEGACY_IDENTITY_CONTRACT
+    assert "--provider-config-contract" not in seen[-1]

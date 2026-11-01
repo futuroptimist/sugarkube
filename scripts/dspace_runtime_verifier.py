@@ -89,7 +89,19 @@ LEGACY_PROVIDER_CONFIG_311_COORDINATES = {
     "semanticTag": "v3.1.1",
     "expectedDefaultChatProvider": "token-place",
 }
+# Compatibility only: these coordinates do not approve the chart or a rollout.
+# Source: democratizedspace/dspace@47900748f61e1ef38c6289fc697f7a070f7fa3c9
+# frontend/src/pages/build-meta.json.ts and utils/buildMetaServer.js.
+HOTFIX_302_COORDINATES = {
+    **LEGACY_303_COORDINATES,
+    "applicationVersion": "3.0.2",
+    "sourceRevision": "47900748f61e1ef38c6289fc697f7a070f7fa3c9",
+    "imageTag": "hotfix-47900748f61e1ef38c6289fc697f7a070f7fa3c9",
+    "imageDigest": "sha256:5d16cde03df4cfe9a52341c26bb6167234d315f896d422af38383b760bebcfe0",
+    "semanticTag": "v3.0.2",
+}
 LEGACY_IDENTITY_COORDINATES = (
+    HOTFIX_302_COORDINATES,
     LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,
     LEGACY_310_COORDINATES,

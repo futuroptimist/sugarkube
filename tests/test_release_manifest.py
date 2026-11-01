@@ -2070,3 +2070,33 @@ def test_preflight_emits_chart_and_image_from_one_validated_manifest(
         f"{approved['imageTag']}@{DIGEST}",
     ]
     assert json.loads(source.read_text())["imageDigest"] != approved["imageDigest"]
+
+
+@pytest.mark.parametrize("schema", [1, 2])
+def test_full_hotfix_tag_preserves_exact_source(schema: int) -> None:
+    value = upstream() if schema == 1 else split_upstream()
+    value["imageTag"] = "hotfix-" + SHA
+    result = manifest.candidate(value, "staging", "openai", "2026-11-01T00:00:00Z", "test")
+    assert result["imageTag"] == "hotfix-" + SHA
+    assert result["sourceRevision"] == SHA
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "hotfix-" + SHA[:7],
+        "hotfix-" + SHA[:-1],
+        "hotfix-" + SHA + "0",
+        "hotfix-" + SHA.upper(),
+        "hotfix-" + SHA[:7] + "0" * 33,
+        "hotfix-" + "f" * 40,
+        "hotfix-v3.0.2",
+        "v3.0.2",
+        "main-" + SHA,
+    ],
+)
+def test_invalid_hotfix_or_mutable_tag_fails_closed(tag: str) -> None:
+    value = upstream()
+    value["imageTag"] = tag
+    with pytest.raises(manifest.ManifestError, match="imageTag"):
+        manifest.candidate(value, "staging", "openai", "2026-11-01T00:00:00Z", "test")

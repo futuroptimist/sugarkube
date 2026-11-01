@@ -63,7 +63,7 @@ SEMVER_RE = re.compile(
     r"(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
-IMAGE_TAG_RE = re.compile(r"^(?:main|v[0-9]+)-([0-9a-f]{7})$")
+IMAGE_TAG_RE = re.compile(r"^(?:(?:main|v[0-9]+)-([0-9a-f]{7})|hotfix-([0-9a-f]{40}))$")
 PROVIDERS = {"token-place", "openai"}
 REVISION_ANNOTATION = "org.opencontainers.image.revision"
 RUNTIME_METHOD = "podImageID+ociRevisionAnnotation"
@@ -241,9 +241,11 @@ def _validate_upstream(value: dict[str, Any]) -> None:
     match = IMAGE_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
     if not match:
         raise ManifestError(
-            "imageTag must be an immutable lowercase branch-SHA tag with a seven-character suffix"
+            "imageTag must be main/vN-<7 lowercase hex> or hotfix-<40 lowercase hex>"
         )
-    if match.group(1) != sha[:7]:
+    suffix = match.group(2) or match.group(1)
+    expected_suffix = sha if match.group(2) else sha[:7]
+    if suffix != expected_suffix:
         raise ManifestError("imageTag suffix does not match sourceRevision")
     for field in ("imageDigest", "chartDigest"):
         if not isinstance(value[field], str) or not DIGEST_RE.fullmatch(value[field]):
