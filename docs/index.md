@@ -14,6 +14,8 @@ Pi cluster and aquarium aerator while the frame supports climbing plants.*
 ## Getting Started
 Review the safety notes before working with power components.
 
+- [CVE-2026-98432 assessment](cve-2026-98432-assessment.md) — host kernel evidence gaps
+  and proposed staging-first response; documentation only
 - [Axel database platform design](design/axel-database-platform.md) — proposed K269/P6 tenant,
   storage, recovery and security boundaries; documentation only
 - [start-here.md](start-here.md) — orientation tracks for newcomers
