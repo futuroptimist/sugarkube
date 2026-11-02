@@ -47,6 +47,9 @@ BUILD_FIELDS = {"version", "revision", "shortRevision", "buildTimestamp", "image
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
+HOTFIX_IDENTITY_CONTRACT = "hotfix-build-meta-oci-v1"
+HOTFIX_VERSION_LABEL = "v3.0.2+4790074"
+ARTIFACT_PROOF_PREFIX = "DSPACE_ARTIFACT_VERSION_PROOF "
 LEGACY_302_COORDINATES = {
     "schemaVersion": 2,
     "applicationVersion": "3.0.1",
@@ -101,7 +104,6 @@ HOTFIX_302_COORDINATES = {
     "semanticTag": "v3.0.2",
 }
 LEGACY_IDENTITY_COORDINATES = (
-    HOTFIX_302_COORDINATES,
     LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,
     LEGACY_310_COORDINATES,
@@ -295,6 +297,8 @@ def marker(raw: bytes, revision: str, category: str) -> None:
 
 def identity_contract(manifest: dict[str, Any]) -> str:
     """Select legacy identity only for a complete approved immutable tuple."""
+    if all(manifest.get(key) == value for key, value in HOTFIX_302_COORDINATES.items()):
+        return HOTFIX_IDENTITY_CONTRACT
     if any(
         all(manifest.get(key) == value for key, value in coordinates.items())
         for coordinates in LEGACY_IDENTITY_COORDINATES
@@ -305,6 +309,8 @@ def identity_contract(manifest: dict[str, Any]) -> str:
 
 def provider_config_contract(manifest: dict[str, Any]) -> str | None:
     """Select a compatibility contract only for its finalized immutable coordinate fixture."""
+    if identity_contract(manifest) == HOTFIX_IDENTITY_CONTRACT:
+        return "hotfix-openai-config-v1"
     if all(
         manifest.get(key) == value for key, value in LEGACY_PROVIDER_CONFIG_311_COORDINATES.items()
     ):
@@ -349,6 +355,41 @@ def legacy_identity(raw: bytes, revision: str, category: str) -> tuple[str, str,
     if timestamp.tzinfo is None:
         fail(category)
     return revision, generated_at, source
+
+
+def hotfix_health(raw: bytes, category: str) -> None:
+    """Check health configuration agreement; OCI evidence proves application version."""
+    try:
+        if len(raw) > 1024 * 1024:
+            fail(category)
+        value = json.loads(raw)
+        if value.get("status") != "ready" or value.get("version") != HOTFIX_VERSION_LABEL:
+            fail(category)
+    except (ValueError, AttributeError, RecursionError):
+        fail(category)
+
+
+def hotfix_artifact_version(stdout: str, manifest: dict[str, Any]) -> str:
+    """Require the real runner's successful digest-authenticated version proof."""
+    expected = {
+        "method": "sha256-index-platform-config-version-label",
+        "applicationVersion": manifest["applicationVersion"],
+        "sourceRevision": manifest["sourceRevision"],
+        "imageDigest": manifest["imageDigest"],
+        "imageVersionLabel": HOTFIX_VERSION_LABEL,
+    }
+    try:
+        if len(stdout) > 1024 * 1024:
+            fail("artifact version proof")
+        lines = [line for line in stdout.splitlines() if line.startswith(ARTIFACT_PROOF_PREFIX)]
+        if len(lines) != 1:
+            fail("artifact version proof")
+        proof = json.loads(lines[0][len(ARTIFACT_PROOF_PREFIX) :])
+        if proof != expected:
+            fail("artifact version proof")
+        return proof["applicationVersion"]
+    except (ValueError, TypeError, RecursionError):
+        fail("artifact version proof")
 
 
 def root_document(raw: bytes, category: str) -> None:
@@ -404,9 +445,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args.manifest)
     contract = identity_contract(manifest)
     provider_contract = provider_config_contract(manifest)
-    identity_path = (
-        "/build-meta.json" if contract == LEGACY_IDENTITY_CONTRACT else "/build-info.json"
-    )
+    uses_build_meta = contract in {LEGACY_IDENTITY_CONTRACT, HOTFIX_IDENTITY_CONTRACT}
+    identity_path = "/build-meta.json" if uses_build_meta else "/build-info.json"
     expected = {
         "version": manifest["applicationVersion"],
         "revision": manifest["sourceRevision"],
@@ -569,11 +609,15 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         try:
             direct_build = command(proxy + [prefix + identity_path]).encode()
             direct_html = command(proxy + [prefix + "/"]).encode()
+            if contract == HOTFIX_IDENTITY_CONTRACT:
+                hotfix_health(
+                    command(proxy + [prefix + "/healthz"]).encode(), "direct health version"
+                )
         except VerificationError:
             fail("direct identity")
         direct_identity = (
             legacy_identity(direct_build, expected["revision"], "direct identity")
-            if contract == LEGACY_IDENTITY_CONTRACT
+            if uses_build_meta
             else identity(
                 direct_build,
                 expected["version"],
@@ -585,7 +629,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         if replica_identity is not None and direct_identity != replica_identity:
             fail("pod/replica identity")
         replica_identity = direct_identity
-        if contract == LEGACY_IDENTITY_CONTRACT:
+        if uses_build_meta:
             root_document(direct_html, "direct identity")
         else:
             marker(direct_html, expected["revision"], "direct identity")
@@ -596,7 +640,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             expected["revision"],
             "public identity",
         )
-        if contract == LEGACY_IDENTITY_CONTRACT
+        if uses_build_meta
         else identity(
             fetch(base_url + identity_path, origin),
             expected["version"],
@@ -607,8 +651,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     )
     if public_identity != replica_identity:
         fail("public identity")
+    if contract == HOTFIX_IDENTITY_CONTRACT:
+        hotfix_health(fetch(base_url + "/healthz", origin), "public health version")
     public_root = fetch(base_url + "/", origin)
-    if contract == LEGACY_IDENTITY_CONTRACT:
+    if uses_build_meta:
         root_document(public_root, "public identity")
     else:
         marker(public_root, expected["revision"], "public identity")
@@ -626,6 +672,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "--identity-contract",
         contract,
     ]
+    if contract == HOTFIX_IDENTITY_CONTRACT:
+        smoke_argv += ["--expected-image-digest", expected["digest"]]
     if provider_contract is not None:
         smoke_argv += ["--provider-config-contract", provider_contract]
     if expected["provider"] == "token-place":
@@ -645,6 +693,11 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         fail("provider/chat smoke")
     if completed.returncode:
         fail("provider/chat smoke")
+    verified_version = (
+        hotfix_artifact_version(completed.stdout, manifest)
+        if contract == HOTFIX_IDENTITY_CONTRACT
+        else expected["version"]
+    )
     if (
         helm_identity(
             args,
@@ -660,7 +713,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "environment": args.environment,
         "release": args.release,
         "namespace": args.namespace,
-        "applicationVersion": expected["version"],
+        "applicationVersion": verified_version,
         "runtimeSourceRevision": expected["revision"],
         "frontendSourceRevision": expected["revision"],
         "defaultProvider": expected["provider"],

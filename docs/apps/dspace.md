@@ -450,6 +450,36 @@ model expectations come from the ordered values chain. For `openai`, those argum
 OpenAI remains discoverable and missing-key gated without a real key. Standalone production
 verification uses the same command with `env=prod` and a production candidate or final record.
 
+### Exact v3.0.2 hotfix identity contract
+
+The hotfix at source `47900748f61e1ef38c6289fc697f7a070f7fa3c9` uses the full tag
+`hotfix-47900748f61e1ef38c6289fc697f7a070f7fa3c9` and image index
+`sha256:5d16cde03df4cfe9a52341c26bb6167234d315f896d422af38383b760bebcfe0`.
+Only the complete hotfix/chart/provider tuple in `HOTFIX_302_COORDINATES` selects
+`hotfix-build-meta-oci-v1` and `hotfix-openai-config-v1`. All existing image, chart,
+environment, readiness, rollback, and finalization checks remain required.
+
+This contract requires the companion DSPACE runner. It validates a digest-bound OCI
+index and both platform configs, extracts application version `3.0.2` from the immutable
+version label `v3.0.2+4790074`, verifies the full runtime source revision, and proves the
+OpenAI default through the isolated browser submission journey. It does not treat a
+runtime environment variable or a caller-supplied manifest version as artifact proof.
+Sugarkube requires the runner's successful `DSPACE_ARTIFACT_VERSION_PROOF` result and
+rejects missing, duplicate, or mismatched proof. Every direct pod and the public health
+endpoint must also agree with `v3.0.2+4790074`; this is a separate configuration check.
+
+The offline cross-repository regression executes the real runner's argument and contract
+validators. Run it with `DSPACE_RUNNER_CHECKOUT` pointing to the pinned companion checkout:
+
+```bash
+DSPACE_RUNNER_CHECKOUT=/path/to/dspace pytest -q tests/test_dspace_hotfix_runner_integration.py
+```
+
+This is tooling compatibility, not chart verification or promotion authority. Chart 3.0.3
+remains historical publication evidence: anonymous registry access returned HTTP 401.
+Its recorded source render sets the health version to the image tag and digest, which
+this contract rejects. No chart changes or staging rollout are included here.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.
