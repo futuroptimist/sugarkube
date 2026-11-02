@@ -2132,3 +2132,29 @@ def test_hotfix_rejects_health_drift_and_missing_or_invalid_artifact_proof(
     )
     with pytest.raises(verifier.VerificationError, match=category):
         verifier.verify(args)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        (SENTINEL + "x" * (1024 * 1024)).encode(),
+        SENTINEL.encode(),
+        json.dumps([SENTINEL]).encode(),
+    ],
+)
+def test_hotfix_health_rejects_oversized_or_malformed_payload_without_leaking(payload):
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.hotfix_health(payload, "public health version")
+    assert str(raised.value) == "public health version"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [SENTINEL + "x" * (1024 * 1024), verifier.ARTIFACT_PROOF_PREFIX + SENTINEL],
+)
+def test_hotfix_artifact_proof_rejects_oversized_or_malformed_payload_without_leaking(payload):
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.hotfix_artifact_version(payload, verifier.HOTFIX_302_COORDINATES)
+    assert str(raised.value) == "artifact version proof"
+    assert SENTINEL not in str(raised.value)
