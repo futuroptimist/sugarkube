@@ -86,7 +86,12 @@ refusals. Unknown keys, duplicate JSON keys, missing records and type drift are 
   binds the exact enrollment and journal text to captured regular-file metadata and
   records the absent Node-address journal at the standard state path.
 - `identity` repeats the captured machine, database, K3s version and effective systemd
-  fingerprints for comparison with enrollment. `layout` supplies the exact relative
+  fingerprints for comparison with enrollment. The historical `local_database` record
+  contains exactly `member_id`, `cluster_id`, `device`, `inode` and `name_sha256`.
+  Device and inode are captured integer directory identities; the name hash is SHA256
+  of the exact enrolled member name in UTF-8, without a newline. All five values must
+  match the capture and remain preserved; two-field WAL identity records are insufficient.
+  `layout` supplies the exact relative
   resolved stub link, original directory owner/group, safe directory metadata, and
   exactly the two regular resolver files and two resolved sockets. Socket permissions
   may be writable as in the original resolved layout. This first contract requires

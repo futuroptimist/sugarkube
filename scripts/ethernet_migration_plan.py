@@ -84,6 +84,8 @@ def parse(raw):
             object_pairs_hook=pairs,
             parse_constant=lambda _: (_ for _ in ()).throw(Refused("nonfinite JSON number")),
         )
+    except Refused:
+        raise
     except (ValueError, TypeError, RecursionError) as exc:
         raise Refused("invalid or ambiguous JSON") from exc
 
@@ -215,9 +217,25 @@ def enrollment_check(e):
     for key in ("id", "name", "hostname", "node_uid"):
         require(len({m[key] for m in e["members"]}) == 3, "duplicate identity")
     require(e["local_member_id"] in {m["id"] for m in e["members"]}, "local member mismatch")
+    database = e["local_database"]
+    shape(
+        database,
+        {"cluster_id", "member_id", "device", "inode", "name_sha256"},
+        "unsupported database identity schema",
+    )
+    local = next(member for member in e["members"] if member["id"] == e["local_member_id"])
     require(
-        e["local_database"] == {"cluster_id": e["cluster_id"], "member_id": e["local_member_id"]},
+        database["cluster_id"] == e["cluster_id"]
+        and database["member_id"] == local["id"]
+        and database["name_sha256"] == sha(local["name"].encode()),
         "database identity mismatch",
+    )
+    require(
+        type(database["device"]) is int
+        and database["device"] >= 0
+        and type(database["inode"]) is int
+        and database["inode"] > 0,
+        "invalid database directory identity",
     )
     for key in ("machine_id_sha256", "systemd_sha256"):
         fingerprint(e[key])
@@ -303,11 +321,13 @@ def _admit(bundle, catalog):
     e = parse(bundle["enrollment_json"])
     enrollment_check(e)
     require(
-        bundle["identity"]
-        == {
-            key: e[key]
-            for key in ("machine_id_sha256", "systemd_sha256", "local_database", "k3s_version")
-        },
+        canonical(bundle["identity"])
+        == canonical(
+            {
+                key: e[key]
+                for key in ("machine_id_sha256", "systemd_sha256", "local_database", "k3s_version")
+            }
+        ),
         "captured machine/database/systemd identity mismatch",
     )
     state_files = {
@@ -644,11 +664,17 @@ def read_evidence(path):
         return handle.read(8 * 1024 * 1024 + 1)
 
 
+class OfflineArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse's message can contain untrusted arguments, including private paths.
+        raise Refused("invalid command-line arguments")
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = OfflineArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("evidence", help="operator-supplied JSON bundle; '-' reads stdin")
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         raw = (
             sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
             if args.evidence == "-"

@@ -6,6 +6,7 @@ import io
 import json
 import socket
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,13 @@ def sample():
         "armed": True,
         "dual_enrolled": True,
         "pod_resolv_source": "/run/systemd/resolve/resolv.conf",
-        "local_database": {"member_id": "1", "cluster_id": "100"},
+        "local_database": {
+            "member_id": "1",
+            "cluster_id": "100",
+            "device": 1,
+            "inode": 42,
+            "name_sha256": M.sha(b"member1"),
+        },
         "machine_id_sha256": "a" * 64,
         "systemd_sha256": "b" * 64,
         "yaml_fragments": [],
@@ -476,7 +483,7 @@ def test_cli_read_only_and_no_apply(evidence, tmp_path):
     source.write_text(json.dumps(evidence))
     before = source.read_bytes()
     result = subprocess.run(
-        ["python", str(ROOT / "scripts/ethernet_migration_plan.py"), str(source)],
+        [sys.executable, str(ROOT / "scripts/ethernet_migration_plan.py"), str(source)],
         capture_output=True,
         text=True,
     )
@@ -485,7 +492,7 @@ def test_cli_read_only_and_no_apply(evidence, tmp_path):
     assert source.read_bytes() == before
     assert list(tmp_path.iterdir()) == [source]
     result = subprocess.run(
-        ["python", str(ROOT / "scripts/ethernet_migration_plan.py"), "--apply", str(source)],
+        [sys.executable, str(ROOT / "scripts/ethernet_migration_plan.py"), "--apply", str(source)],
         capture_output=True,
     )
     assert result.returncode == 2
@@ -704,3 +711,106 @@ def test_kubeconfig_helper_refuses_unsupported_input_without_disclosure(damage):
     with pytest.raises(M.Refused) as result:
         M.kubeconfig_inventory_digest(config)
     assert "private-material" not in str(result.value)
+
+
+def test_historical_database_record_is_admitted_and_preserved(evidence):
+    enrollment = M.parse(evidence["enrollment_json"])
+    database = enrollment["local_database"]
+    assert database == {
+        "member_id": "1",
+        "cluster_id": "100",
+        "device": 1,
+        "inode": 42,
+        "name_sha256": M.sha(b"member1"),
+    }
+    result = M.plan(evidence)
+    preserved = {**enrollment, "files": dict(enrollment["files"])}
+    for transition in result["transitions"]:
+        preserved["files"].pop(transition["path"], None)
+    assert result["preserved_enrollment_sha256"] == M.sha(M.canonical(preserved))
+    assert evidence["identity"]["local_database"] == database
+    assert result["authorized_to_execute"] is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("member_id", "2"),
+        ("cluster_id", "101"),
+        ("name_sha256", M.sha(b"member1\n")),
+        ("device", -1),
+        ("device", True),
+        ("device", "1"),
+        ("inode", 0),
+        ("inode", False),
+        ("inode", "42"),
+        ("inode", 42.0),
+    ],
+)
+def test_database_record_rejects_invalid_identity(evidence, field, value):
+    database = M.parse(evidence["enrollment_json"])["local_database"]
+    database[field] = value
+    update_enrollment(evidence, "local_database", database)
+    with pytest.raises(M.Refused, match="database"):
+        M.plan(evidence)
+
+
+@pytest.mark.parametrize("field", ["device", "inode", "name_sha256", "unknown"])
+def test_database_schema_drift_is_refused(evidence, field):
+    database = M.parse(evidence["enrollment_json"])["local_database"]
+    if field == "unknown":
+        database[field] = "unrecognized"
+    else:
+        del database[field]
+    update_enrollment(evidence, "local_database", database)
+    with pytest.raises(M.Refused, match="database identity schema"):
+        M.plan(evidence)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("device", 2),
+        ("inode", 43),
+        ("member_id", "2"),
+        ("cluster_id", "101"),
+        ("name_sha256", M.sha(b"other")),
+        ("device", True),
+        ("inode", 42.0),
+    ],
+)
+def test_captured_database_drift_is_refused(evidence, field, value):
+    evidence["identity"]["local_database"][field] = value
+    with pytest.raises(M.Refused, match="captured machine/database/systemd"):
+        M.plan(evidence)
+
+
+@pytest.mark.parametrize(
+    "raw,diagnostic",
+    [
+        ('{"private-value":1,"private-value":2}', "duplicate JSON key"),
+        ('{"private-value":NaN}', "nonfinite JSON number"),
+        ('{"private-value":Infinity}', "nonfinite JSON number"),
+        ('{"private-value":-Infinity}', "nonfinite JSON number"),
+        ('{"private-value":', "invalid or ambiguous JSON"),
+    ],
+)
+def test_json_refusal_diagnostics_remain_specific_and_redacted(raw, diagnostic):
+    with pytest.raises(M.Refused) as result:
+        M.parse(raw)
+    assert str(result.value) == diagnostic
+
+
+@pytest.mark.parametrize(
+    "arguments", [[], ["--apply", "private-value"], ["capture.json", "private-value"]]
+)
+def test_cli_argument_refusals_are_json_and_redacted(arguments, capsys):
+    assert M.main(arguments) == 2
+    output = capsys.readouterr()
+    assert not output.err
+    assert json.loads(output.out) == {
+        "eligible_for_plan": False,
+        "authorized_to_execute": False,
+        "diagnostic": "invalid command-line arguments",
+    }
+    assert "private-value" not in output.out
