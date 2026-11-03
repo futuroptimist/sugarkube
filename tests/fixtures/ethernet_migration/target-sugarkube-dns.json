@@ -1,1 +1,0 @@
-{"interface": "eth0", "members": [{"hostname": "pi1.local"}, {"hostname": "pi2.local"}, {"hostname": "pi3.local"}], "pod_resolv_source": "/run/systemd/resolve/resolv.conf", "resolver_view": {"gid": 0, "kind": "resolved-stub-directory-v1", "symlink": "../run/systemd/resolve/stub-resolv.conf", "uid": 0}, "schema_version": 2}

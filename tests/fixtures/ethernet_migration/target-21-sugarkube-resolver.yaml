@@ -1,2 +1,0 @@
-# Managed by ethernet_quorum_recover.py
-resolv-conf: "/run/sugarkube-ethernet-dns/kubelet-resolv.conf"
