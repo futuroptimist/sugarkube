@@ -1,0 +1,45 @@
+name: DSPACE hotfix contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/dspace_runtime_verifier.py'
+      - 'scripts/dspace_release_manifest.py'
+      - 'tests/test_dspace*'
+      - 'tests/fixtures/dspace_hotfix/**'
+      - '.github/workflows/dspace-hotfix-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/dspace_runtime_verifier.py'
+      - 'scripts/dspace_release_manifest.py'
+      - 'tests/test_dspace*'
+      - 'tests/fixtures/dspace_hotfix/**'
+      - '.github/workflows/dspace-hotfix-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the pinned companion runner
+        uses: actions/checkout@v4
+        with:
+          repository: democratizedspace/dspace
+          ref: 2ca867ef8a0f173197a92698851de3f02c173b07
+          path: .integration/dspace
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Exercise actual runner contracts offline
+        env:
+          DSPACE_RUNNER_CHECKOUT: ${{ github.workspace }}/.integration/dspace
+        run: python -m pytest -q tests/test_dspace_hotfix_runner_integration.py
