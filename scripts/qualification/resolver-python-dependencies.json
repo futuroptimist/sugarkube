@@ -1,0 +1,95 @@
+{
+  "target": "CPython 3.12 Linux, no extras",
+  "registry": "https://pypi.org/simple",
+  "packages": [
+    {
+      "file": "wheels/dnslib-0.9.26-py3-none-any.whl",
+      "sha256": "e68719e633d761747c7e91bd241019ef5a2b61a63f56025939e144c841a70e0d",
+      "bytes": 64161,
+      "name": "dnslib",
+      "version": "0.9.26",
+      "requires_python": null,
+      "requires_dist": [],
+      "url": "https://files.pythonhosted.org/packages/16/93/167364f10194e374119b211e475ed8763d7591ae4f7001b304282dde5825/dnslib-0.9.26-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/dnslib/0.9.26/json"
+    },
+    {
+      "file": "wheels/iniconfig-2.3.0-py3-none-any.whl",
+      "sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12",
+      "bytes": 7484,
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "requires_python": ">=3.10",
+      "requires_dist": [],
+      "url": "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/iniconfig/2.3.0/json"
+    },
+    {
+      "file": "wheels/packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "bytes": 129956,
+      "name": "packaging",
+      "version": "26.3",
+      "requires_python": ">=3.9",
+      "requires_dist": [],
+      "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/packaging/26.3/json"
+    },
+    {
+      "file": "wheels/pluggy-1.6.0-py3-none-any.whl",
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+      "bytes": 20538,
+      "name": "pluggy",
+      "version": "1.6.0",
+      "requires_python": ">=3.9",
+      "requires_dist": [
+        "pre-commit; extra == \"dev\"",
+        "tox; extra == \"dev\"",
+        "pytest; extra == \"testing\"",
+        "pytest-benchmark; extra == \"testing\"",
+        "coverage; extra == \"testing\""
+      ],
+      "url": "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/pluggy/1.6.0/json"
+    },
+    {
+      "file": "wheels/pygments-2.21.0-py3-none-any.whl",
+      "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "bytes": 1250147,
+      "name": "Pygments",
+      "version": "2.21.0",
+      "requires_python": ">=3.9",
+      "requires_dist": [
+        "colorama>=0.4.6; extra == 'windows-terminal'"
+      ],
+      "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/Pygments/2.21.0/json"
+    },
+    {
+      "file": "wheels/pytest-9.1.1-py3-none-any.whl",
+      "sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
+      "bytes": 386536,
+      "name": "pytest",
+      "version": "9.1.1",
+      "requires_python": ">=3.10",
+      "requires_dist": [
+        "colorama>=0.4; sys_platform == \"win32\"",
+        "exceptiongroup>=1; python_version < \"3.11\"",
+        "iniconfig>=1.0.1",
+        "packaging>=22",
+        "pluggy<2,>=1.5",
+        "pygments>=2.7.2",
+        "tomli>=1; python_version < \"3.11\"",
+        "argcomplete; extra == \"dev\"",
+        "attrs>=19.2; extra == \"dev\"",
+        "hypothesis>=3.56; extra == \"dev\"",
+        "mock; extra == \"dev\"",
+        "requests; extra == \"dev\"",
+        "setuptools; extra == \"dev\"",
+        "xmlschema; extra == \"dev\""
+      ],
+      "url": "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl",
+      "registry_metadata": "https://pypi.org/pypi/pytest/9.1.1/json"
+    }
+  ]
+}

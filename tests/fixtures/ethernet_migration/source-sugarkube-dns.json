@@ -1,0 +1,1 @@
+{"interface": "eth0", "members": [{"hostname": "pi1.local"}, {"hostname": "pi2.local"}, {"hostname": "pi3.local"}], "pod_resolv_source": "/run/systemd/resolve/resolv.conf", "schema_version": 2}
