@@ -435,6 +435,13 @@ def validate_receipt(receipt, bundle, approved_plan, now):
     for key in ("namespace", "pod", "container", "hostname"):
         value = probe[key]
         subdomain = key in {"pod", "hostname"}
+        # Kubernetes Pod objects have a 253-character total limit but no
+        # per-segment limit. Actual DNS query names still require 63-byte labels.
+        label_pattern = (
+            r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+            if key == "pod"
+            else r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        )
         # A DNS query may be absolute; Kubernetes object names may not.
         labels = (
             value[:-1]
@@ -445,10 +452,7 @@ def validate_receipt(receipt, bundle, approved_plan, now):
             type(value) is str
             and 1 <= len(value) <= (253 if subdomain else 63)
             and (subdomain or "." not in value)
-            and all(
-                re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-                for label in labels.split(".")
-            ),
+            and all(re.fullmatch(label_pattern, label) for label in labels.split(".")),
             "invalid DNS probe selector",
         )
     plan.require(type(probe["uid"]) is str and bool(probe["uid"]), "missing probe pod identity")

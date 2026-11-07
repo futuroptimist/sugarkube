@@ -1407,7 +1407,6 @@ def test_receipt_requires_kubernetes_dns_labels(field, value):
         ".a",
         "a.-b",
         "a.b-",
-        "a" * 64 + ".b",
         ".".join(["a" * 63] * 4),
         "",
         "UPPER",
@@ -1459,3 +1458,76 @@ def test_hostname_terminal_dot_keeps_existing_total_length_limit():
     record["pod_dns"]["hostname"] = ".".join(["a" * 63] * 3 + ["b" * 61]) + "."
     with pytest.raises(H.plan.Refused, match="DNS probe selector"):
         H.validate_receipt(record, bundle, {}, 150)
+
+
+@pytest.mark.parametrize(
+    "value", ["a" * 63, "a" * 64, "a" * 253, "a" * 64 + ".b", "a" * 125 + "." + "b" * 127]
+)
+def test_pod_object_name_uses_kubernetes_total_limit_not_dns_label_limit(value):
+    # Primary contract: kubernetes/apimachinery v0.35.0 validation.go,
+    # IsDNS1123Subdomain (253 total and regexp, no per-label length check).
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"]["pod"] = value
+    H.validate_receipt(record, bundle, {}, 150)
+    assert record["pod_dns"]["pod"] == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a" * 254,
+        "a" * 126 + "." + "b" * 127,
+        "a" * 252 + ".",
+        "-" + "a" * 252,
+        "a" * 252 + "-",
+        "a" * 64 + ".-b",
+        "a" * 64 + ".b-",
+        "a_b",
+        "*.pod",
+        "a\n",
+        "a\x00",
+        "aé",
+    ],
+)
+def test_pod_object_name_still_rejects_overlong_and_malformed_values(value):
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"]["pod"] = value
+    with pytest.raises(H.plan.Refused, match="DNS probe selector"):
+        H.validate_receipt(record, bundle, {}, 150)
+
+
+@pytest.mark.parametrize("field", ["namespace", "container", "hostname"])
+@pytest.mark.parametrize("value", ["a" * 64, "a" * 64 + ".b"])
+def test_pod_object_exception_never_relaxes_other_probe_name_rules(field, value):
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"][field] = value
+    with pytest.raises(H.plan.Refused, match="DNS probe selector"):
+        H.validate_receipt(record, bundle, {}, 150)
+
+
+def test_long_pod_object_name_reaches_fake_kubectl_unchanged(files):
+    host, fake = adapter(fixtures.sample(), files)
+    pod_name = "a" * 253
+    host.receipt["pod_dns"]["pod"] = pod_name
+    H.validate_receipt(host.receipt, host.bundle, host.plan, 150)
+    calls = []
+
+    def command(argv):
+        calls.append(argv)
+        if "exec" in argv:
+            return "192.0.2.1 STREAM example.test\n"
+        return H.json.dumps(
+            {
+                "metadata": {"uid": "uid"},
+                "spec": {"nodeName": "pi1", "containers": [{"name": "main"}]},
+                "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]},
+            }
+        )
+
+    fake.command = command
+    host.pod_dns()
+    assert calls[0][calls[0].index("pod") + 1] == pod_name
+    assert calls[1][calls[1].index("exec") + 1] == pod_name
