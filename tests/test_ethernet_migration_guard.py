@@ -36,7 +36,7 @@ class Backend:
 
 @pytest.fixture
 def case(tmp_path, monkeypatch):
-    monkeypatch.setattr(M, "trusted_file", lambda p: None)
+    monkeypatch.setattr(M, "trusted_file", lambda p: p.lstat())
     monkeypatch.setenv("INVOCATION_ID", "a" * 32)
     monkeypatch.setattr(M, "migration_service_context", lambda b, p: checked_invocation())
     e = {
@@ -187,7 +187,7 @@ def test_main_routes_through_guard_before_controller_action(case, monkeypatch, p
     backend.close = lambda: None
     monkeypatch.setattr(M, "Backend", lambda e: backend)
     monkeypatch.setattr(M.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(M, "private_state", lambda p: None)
+    monkeypatch.setattr(M, "private_state", lambda p: p.lstat())
     monkeypatch.setattr(M, "report_startup_failure", lambda b, p: None)
     monkeypatch.setattr(M, "enroll", lambda *args: pytest.fail("enrollment bypass"))
     monkeypatch.setattr(M, "prepare_resolver", lambda *args: pytest.fail("resolver bypass"))
@@ -209,7 +209,7 @@ def test_completed_migration_allows_arm_json_reformatting(case, monkeypatch, pha
     backend.close = lambda: None
     monkeypatch.setattr(M, "Backend", lambda e: backend)
     monkeypatch.setattr(M.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(M, "private_state", lambda p: None)
+    monkeypatch.setattr(M, "private_state", lambda p: p.lstat())
     actions = {
         name: (lambda: "unchanged")
         for name in (
@@ -295,3 +295,111 @@ def test_guard_parser_recursion_failure_is_normalized(case, monkeypatch):
     monkeypatch.setattr(M.json, "loads", exhausted)
     with pytest.raises(M.Stop, match="invalid migration record JSON"):
         run(case, "watch")
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "regular", "fifo"])
+def test_record_swap_before_open_refuses(case, monkeypatch, replacement):
+    path = case[2] / "migration-intent.json"
+    original = path.read_bytes()
+    saved = path.with_suffix(".saved")
+    real_open = M.os.open
+    flags_seen = []
+
+    def swapped_open(target, flags, *args):
+        if target == path:
+            flags_seen.append(flags)
+            path.rename(saved)
+            if replacement == "symlink":
+                path.symlink_to(saved)
+            elif replacement == "regular":
+                path.write_bytes(original)
+            else:
+                M.os.mkfifo(path)
+        return real_open(target, flags, *args)
+
+    monkeypatch.setattr(M.os, "open", swapped_open)
+    with pytest.raises(M.Stop, match="trusted migration record|changed during open"):
+        run(case)
+    assert len(flags_seen) == 1
+    assert flags_seen[0] & M.os.O_NOFOLLOW
+    assert flags_seen[0] & M.os.O_NONBLOCK
+    assert saved.read_bytes() == original
+    assert not (case[2] / "migration-start-consumed.json").exists()
+
+
+@pytest.mark.parametrize("drift", ["grow", "truncate", "same-size", "replace", "symlink", "mode"])
+def test_record_drift_during_read_refuses(case, monkeypatch, drift):
+    path = case[2] / "record"
+    path.write_bytes(b"1234")
+    real_fdopen = M.os.fdopen
+    sizes = []
+
+    class Reader:
+        def __init__(self, fd, mode):
+            self.handle = real_fdopen(fd, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.handle.close()
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def read(self, size):
+            sizes.append(size)
+            if drift == "grow":
+                path.write_bytes(b"x" * 20)
+            elif drift == "truncate":
+                path.write_bytes(b"1")
+            elif drift == "same-size":
+                path.write_bytes(b"4321")
+            elif drift == "mode":
+                path.chmod(0o666)
+            else:
+                saved = path.with_suffix(".saved")
+                path.rename(saved)
+                if drift == "replace":
+                    path.write_bytes(b"1234")
+                else:
+                    path.symlink_to(saved)
+            return self.handle.read(size)
+
+    monkeypatch.setattr(M.os, "fdopen", Reader)
+    with pytest.raises(M.Stop, match="too large|changed during read"):
+        M.migration_record_bytes(path, 8)
+    assert sizes == [9]
+
+
+@pytest.mark.parametrize("kind", ["oversized", "symlink", "hardlink", "directory"])
+def test_record_invalid_initial_file_never_opened(case, monkeypatch, kind):
+    path = case[2] / "record"
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "symlink":
+        path.symlink_to(case[0])
+    else:
+        path.write_bytes(b"x" * (9 if kind == "oversized" else 4))
+        if kind == "hardlink":
+            M.os.link(path, path.with_suffix(".link"))
+    monkeypatch.setattr(M.os, "open", lambda *a: pytest.fail("must refuse before open"))
+    with pytest.raises(M.Stop, match="too large|single-link regular"):
+        M.migration_record_bytes(path, 8)
+
+
+def test_record_exact_size_ceiling(case):
+    path = case[2] / "record"
+    path.write_bytes(b"12345678")
+    assert M.migration_record_bytes(path, 8) == b"12345678"
+
+
+def test_original_incident_retains_eight_megabyte_allowance(case):
+    incident = case[2] / "incident.json"
+    incident.write_bytes(b" " * 65536 + incident.read_bytes())
+    for name in ("migration-intent.json", "migration-start-permit.json"):
+        path = case[2] / name
+        value = json.loads(path.read_bytes())
+        value["incident_sha256"] = M.digest(incident.read_bytes())
+        path.write_text(json.dumps(value))
+    assert run(case) == "migration-start-authorized"

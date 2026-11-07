@@ -1872,12 +1872,15 @@ def trusted_file(path):
         not path.is_symlink() and info.st_uid == 0 and info.st_mode & 0o022 == 0,
         "untrusted enrollment permissions",
     )
+    entry = info
     for parent in path.parents:
         info = parent.lstat()
         require(
             not parent.is_symlink() and info.st_uid == 0 and info.st_mode & 0o022 == 0,
             "untrusted parent directory",
         )
+
+    return entry
 
 
 def install_directory(path, mode=0o755):
@@ -2098,6 +2101,48 @@ def migration_service_context(backend, phase):
     return invocation
 
 
+def migration_record_bytes(path, max_bytes=65536):
+    """Read trusted bytes without following a swapped leaf or accepting drift."""
+
+    def identity(info):
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_uid,
+            info.st_gid,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+            info.st_nlink,
+        )
+
+    try:
+        before = trusted_file(path)
+        require(
+            stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
+            "migration record is not a single-link regular file",
+        )
+        require(before.st_size <= max_bytes, "migration record too large")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            require(
+                identity(os.fstat(handle.fileno())) == identity(before),
+                "migration record changed during open",
+            )
+            raw = handle.read(max_bytes + 1)
+            require(len(raw) <= max_bytes, "migration record too large")
+            require(
+                len(raw) == before.st_size
+                and identity(os.fstat(handle.fileno())) == identity(before)
+                and identity(trusted_file(path)) == identity(before),
+                "migration record changed during read",
+            )
+        return raw
+    except OSError as exc:
+        raise Stop("cannot read trusted migration record") from exc
+
+
 def migration_start_guard(enrollment_path, backend, state_dir, phase):
     """Fence an active migration; permit one exact baseline systemd invocation.
 
@@ -2109,9 +2154,6 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
         return None
 
     def read_record(path, max_bytes=65536):
-        trusted_file(path)
-        require(stat.S_ISREG(path.lstat().st_mode), "migration record is not regular")
-        require(path.stat().st_size <= max_bytes, "migration record too large")
 
         def pairs(items):
             result = {}
@@ -2128,9 +2170,7 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
             require(math.isfinite(value), "nonfinite migration JSON number")
             return value
 
-        with path.open("rb") as handle:
-            raw = handle.read(max_bytes + 1)
-        require(len(raw) <= max_bytes, "migration record too large")
+        raw = migration_record_bytes(path, max_bytes)
         try:
             value = json.loads(
                 raw, object_pairs_hook=pairs, parse_constant=finite, parse_float=number
@@ -2176,17 +2216,17 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
     require(phase in {"pre-start", "post-start"}, "migration intent blocks recovery")
     permit = state_dir / "migration-start-permit.json"
     require(read_record(permit) == expected, "migration start permit mismatch")
-    trusted_file(enrollment_path)
     incident = state_dir / "incident.json"
-    trusted_file(incident)
+    enrollment_raw = migration_record_bytes(enrollment_path, max_bytes=8 * 1024 * 1024)
+    incident_raw = migration_record_bytes(incident, max_bytes=8 * 1024 * 1024)
     require(
-        digest(enrollment_path.read_bytes()) == expected["target_enrollment_sha256"]
-        and digest(incident.read_bytes()) == expected["incident_sha256"]
+        digest(enrollment_raw) == expected["target_enrollment_sha256"]
+        and digest(incident_raw) == expected["incident_sha256"]
         and backend.e["local_ipv4"] == expected["baseline_ipv4"]
         and backend.address() == expected["baseline_ipv4"],
         "migration baseline changed",
     )
-    journal = json.loads(incident.read_bytes())
+    journal = json.loads(incident_raw)
     require(
         journal.get("phase") == "complete" and journal.get("kind") == "enrollment",
         "migration original journal is not complete",
