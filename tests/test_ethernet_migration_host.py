@@ -4,6 +4,7 @@ import base64
 import copy
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,15 @@ def forbid_live_subprocess(monkeypatch):
         raise AssertionError("offline tests must inject lifecycle subprocess")
 
     monkeypatch.setattr(H.subprocess, "run", forbidden)
+
+
+@pytest.fixture
+def runtime_dir():
+    # A normal CI /tmp is writable by everyone. Loader fixtures must live under
+    # the same trusted ancestry as the already-imported repository sources.
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory(prefix=".migration-runtime-test-", dir=root) as directory:
+        yield Path(directory)
 
 
 @pytest.fixture
@@ -329,7 +339,7 @@ def test_core_adapter_real_guard(core_case, files, monkeypatch):  # noqa: F811
     put(files, H.STATE + "/incident.json", bundle["journals"]["incident_json"].encode())
     put(files, H.apply_module.ENROLLMENT, bundle["enrollment_json"].encode())
     module = H.recovery
-    monkeypatch.setattr(module, "trusted_file", lambda path: None)
+    monkeypatch.setattr(module, "trusted_file", lambda path: path.lstat())
     monkeypatch.setattr(module, "migration_service_context", lambda backend, phase: "a" * 32)
     # Reuse the core case's explicitly synthetic pinned catalog.
     from test_ethernet_migration_apply import A
@@ -675,11 +685,11 @@ def test_absent_metadata_is_explicit(files):
     }
 
 
-def test_untrusted_sibling_is_not_executed(tmp_path, monkeypatch):
-    runtime = tmp_path / "unsafe.py"
+def test_untrusted_sibling_is_not_executed(runtime_dir, monkeypatch):
+    runtime = runtime_dir / "unsafe.py"
     runtime.write_text("raise AssertionError('must not execute')")
     runtime.chmod(0o666)
-    monkeypatch.setattr(H, "__file__", str(tmp_path / "ethernet_migration_host.py"))
+    monkeypatch.setattr(H, "__file__", str(runtime_dir / "ethernet_migration_host.py"))
     with pytest.raises(RuntimeError, match="untrusted migration runtime"):
         H.sibling("unsafe")
 
@@ -799,7 +809,7 @@ def test_earlier_network_hook_drift_keeps_backup_and_guard_blocks_recovery(files
     }
     H.apply_module.IntentStore(state).reserve(intent)
     monkeypatch.setattr(H.fcntl, "flock", lambda fd, flags: None)
-    monkeypatch.setattr(H.recovery, "trusted_file", lambda path: None)
+    monkeypatch.setattr(H.recovery, "trusted_file", lambda path: path.lstat())
     monkeypatch.setattr(H.recovery, "migration_service_context", lambda backend, phase: "a" * 32)
     guard = GuardBackend(host.e, H.plan.canonical(host.owner).decode())
     hooks, normal_recovery = [], []
@@ -1531,3 +1541,118 @@ def test_long_pod_object_name_reaches_fake_kubectl_unchanged(files):
     host.pod_dns()
     assert calls[0][calls[0].index("pod") + 1] == pod_name
     assert calls[1][calls[1].index("exec") + 1] == pod_name
+
+
+@pytest.mark.parametrize(
+    "position,mode", [("parent", 0o777), ("ancestor", 0o775), ("ancestor", 0o1777)]
+)
+def test_sibling_rejects_writable_parent_or_ancestor_before_execution(
+    runtime_dir, monkeypatch, position, mode
+):
+    ancestor = runtime_dir / "ancestor"
+    directory = ancestor / "scripts"
+    directory.mkdir(parents=True)
+    runtime = directory / "probe.py"
+    runtime.write_text("raise AssertionError('untrusted code executed')")
+    runtime.chmod(0o644)
+    (directory if position == "parent" else ancestor).chmod(mode)
+    monkeypatch.setattr(H, "__file__", str(directory / "ethernet_migration_host.py"))
+    with pytest.raises(RuntimeError, match="untrusted migration runtime directory"):
+        H.sibling("probe")
+
+
+def test_sibling_rejects_symlinked_ancestor_without_resolving_it(runtime_dir, monkeypatch):
+    trusted = runtime_dir / "trusted"
+    trusted.mkdir()
+    (trusted / "probe.py").write_text("raise AssertionError('must not execute')")
+    route = runtime_dir / "route"
+    route.symlink_to(trusted, target_is_directory=True)
+    monkeypatch.setattr(H, "__file__", str(route / "ethernet_migration_host.py"))
+    with pytest.raises(OSError):
+        H.sibling("probe")
+
+
+@pytest.mark.parametrize("target", ["directory", "file"])
+def test_sibling_rejects_untrusted_owner(runtime_dir, monkeypatch, target):
+    import types
+
+    directory = runtime_dir / "trusted"
+    directory.mkdir()
+    runtime = directory / "probe.py"
+    runtime.write_text("raise AssertionError('must not execute')")
+    inode = (directory if target == "directory" else runtime).stat().st_ino
+    real_fstat = H.os.fstat
+
+    def changed_owner(fd):
+        info = real_fstat(fd)
+        if info.st_ino == inode:
+            fields = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+            fields["st_uid"] = os.geteuid() + 12345
+            return types.SimpleNamespace(**fields)
+        return info
+
+    monkeypatch.setattr(H.os, "fstat", changed_owner)
+    monkeypatch.setattr(H, "__file__", str(directory / "ethernet_migration_host.py"))
+    with pytest.raises(RuntimeError, match="untrusted migration runtime"):
+        H.sibling("probe")
+
+
+@pytest.mark.parametrize("filename", ["../probe.py", "/probe.py", ".", ".."])
+def test_sibling_rejects_path_escape_names(filename):
+    with pytest.raises(RuntimeError, match="runtime name"):
+        H.sibling("probe", filename)
+
+
+@pytest.mark.parametrize("change", ["growth", "replacement"])
+def test_sibling_refuses_change_during_fd_read(runtime_dir, monkeypatch, change):
+    runtime = runtime_dir / "probe.py"
+    runtime.write_bytes(b"VALUE=42\n")
+    monkeypatch.setattr(H, "__file__", str(runtime_dir / "ethernet_migration_host.py"))
+    monkeypatch.setattr(H, "_RUNTIME_READ_LIMIT", 16)
+    real_fdopen = H.os.fdopen
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def read(self, size):
+            assert size == 17
+            if change == "growth":
+                runtime.write_bytes(b"x" * 32)
+            else:
+                runtime.rename(runtime.with_name("prior.py"))
+                runtime.write_bytes(b"VALUE=99\n")
+            return self.handle.read(size)
+
+    monkeypatch.setattr(H.os, "fdopen", lambda *args: Reader(real_fdopen(*args)))
+    with pytest.raises(RuntimeError, match="runtime changed during read"):
+        H.sibling("probe")
+
+
+def test_sibling_executes_verified_bytes_without_reopening_path(runtime_dir, monkeypatch):
+    import builtins
+
+    runtime = runtime_dir / "probe.py"
+    original = b"VALUE=42\n"
+    runtime.write_bytes(original)
+    monkeypatch.setattr(H, "__file__", str(runtime_dir / "ethernet_migration_host.py"))
+    real_compile = builtins.compile
+
+    def replace_after_verification(source, filename, mode):
+        assert source == original
+        runtime.write_text("raise AssertionError('path was reopened')")
+        return real_compile(source, filename, mode)
+
+    monkeypatch.setattr(H, "compile", replace_after_verification, raising=False)
+    module = H.sibling("probe")
+    assert module.VALUE == 42
+    assert module.__file__ == str(runtime)

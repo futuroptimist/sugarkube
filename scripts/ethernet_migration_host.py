@@ -11,7 +11,6 @@ import base64
 import copy
 import fcntl
 import hashlib
-import importlib.util
 import json
 import os
 import secrets
@@ -25,16 +24,67 @@ from pathlib import Path
 
 import yaml
 
+_RUNTIME_READ_LIMIT = 128 * 1024 * 1024
+
 
 def sibling(name, filename=None):
-    """Load only the explicit adjacent source, including under Python -I."""
-    path = Path(__file__).resolve().with_name(filename or name + ".py")
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
-        raise RuntimeError("untrusted migration runtime")
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    """Load verified adjacent bytes through trusted, no-follow ancestor FDs."""
+    filename = filename or name + ".py"
+    if Path(filename).name != filename or filename in {"", ".", ".."}:
+        raise RuntimeError("untrusted migration runtime name")
+    # Do not resolve symlinks before checking ancestors: that would conceal an
+    # untrusted route into an otherwise trusted source directory.
+    path = Path(os.path.abspath(__file__)).with_name(filename)
+    uid = os.geteuid()
+
+    def trusted_directory(info):
+        if info.st_uid not in {0, uid} or info.st_mode & 0o022:
+            raise RuntimeError("untrusted migration runtime directory")
+
+    def identity(info):
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_uid,
+            info.st_gid,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
+
+    parent = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        trusted_directory(os.fstat(parent))
+        for component in path.parts[1:-1]:
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+            trusted_directory(os.fstat(parent))
+        fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != uid
+                or before.st_mode & 0o022
+                or before.st_size > _RUNTIME_READ_LIMIT
+            ):
+                raise RuntimeError("untrusted migration runtime")
+            raw = handle.read(_RUNTIME_READ_LIMIT + 1)
+            if (
+                len(raw) > _RUNTIME_READ_LIMIT
+                or identity(os.fstat(handle.fileno())) != identity(before)
+                or identity(os.stat(filename, dir_fd=parent, follow_symlinks=False))
+                != identity(before)
+            ):
+                raise RuntimeError("migration runtime changed during read")
+    finally:
+        os.close(parent)
+    # Compile the verified bytes, never reopen the pathname via importlib.
+    module = types.ModuleType(name)
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), "exec"), module.__dict__)
     return module
 
 
@@ -62,7 +112,7 @@ LIFECYCLE_TIMEOUTS = {
     ("daemon-reload",): 30,
     ("start", TIMER): 30,
 }
-MAX_INPUT_BYTES = 128 * 1024 * 1024
+MAX_INPUT_BYTES = _RUNTIME_READ_LIMIT
 LIFECYCLE_BUDGET = 600
 COMPLETION_BUDGET = 120
 COMPLETION_ATTEMPTS = 61
