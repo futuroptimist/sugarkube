@@ -408,6 +408,7 @@ def test_capture_refreshes_challenge_after_local_and_remote_checks(files, monkey
     host.receipt = receipt(host.bundle)
     host.receipt["backup_files"]["restore_evidence_sha256"] = H.plan.sha(raw["/restore"])
     monkeypatch.setattr(files, "read", lambda path: raw[path])
+    monkeypatch.setattr(files, "digest", lambda path: H.plan.sha(raw[path]))
     fake.config = lambda: fake.calls.append("config")
     fake.command = lambda argv: "ActiveState=inactive\nSubState=dead\n"
     fresh = host.capture("e" * 64)
@@ -656,3 +657,74 @@ def test_entrypoint_help_does_not_touch_host(monkeypatch):
     with pytest.raises(SystemExit) as result:
         runpy.run_path(H.__file__, run_name="__main__")
     assert result.value.code == 0
+
+
+def test_backup_digest_streams_multiple_chunks_and_exceeds_small_input_limit(files):
+    path = put(files, "/large-backup", b"")
+    size = 128 * 1024 * 1024 + 1
+    with path.open("wb") as handle:
+        handle.truncate(size)  # Sparse, offline-only fixture; no large allocation.
+    expected = H.hashlib.sha256()
+    for _ in range(128):
+        expected.update(bytes(1024 * 1024))
+    expected.update(b"\0")
+    with pytest.raises(H.plan.Refused, match="input file too large"):
+        files.read("/large-backup")
+    assert files.digest("/large-backup") == expected.hexdigest()
+    assert files.digest("/large-backup", max_bytes=size) == expected.hexdigest()
+    with pytest.raises(H.plan.Refused, match="streaming bound"):
+        files.digest("/large-backup", max_bytes=size - 1)
+
+
+@pytest.mark.parametrize("change", ["truncate", "grow", "overwrite", "replace", "mode"])
+def test_backup_digest_refuses_in_read_drift(files, monkeypatch, change):
+    path = put(files, "/backup", b"original")
+    trusted = files.trusted
+    changed = False
+
+    def mutate_after_open(info):
+        nonlocal changed
+        trusted(info)
+        if H.stat.S_ISREG(info.st_mode) and not changed:
+            changed = True
+            if change == "truncate":
+                path.write_bytes(b"")
+            elif change == "grow":
+                path.write_bytes(b"original-more")
+            elif change == "overwrite":
+                path.write_bytes(b"modified")
+            elif change == "replace":
+                path.rename(path.with_name("prior"))
+                path.write_bytes(b"original")
+            else:
+                path.chmod(0o600)
+
+    monkeypatch.setattr(files, "trusted", mutate_after_open)
+    with pytest.raises(H.plan.Refused, match="backup (truncated|grew|changed)"):
+        files.digest("/backup")
+
+
+@pytest.mark.parametrize("times", [[0, 121], [0, -1], [0, 0, 121], [0, 0, -1]])
+def test_backup_digest_enforces_deadline_before_and_after_reads(files, times):
+    put(files, "/backup", b"x")
+    ticks = iter(times)
+    with pytest.raises(H.plan.Refused, match="time budget"):
+        files.digest("/backup", clock=lambda: next(ticks))
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo"])
+def test_backup_digest_rejects_untrusted_file_types(files, kind):
+    path = put(files, "/original", b"x")
+    if kind == "symlink":
+        (files.root / "backup").symlink_to(path)
+    elif kind == "hardlink":
+        os.link(path, files.root / "backup")
+    else:
+        os.mkfifo(files.root / "backup", 0o600)
+    with pytest.raises((H.plan.Refused, OSError)):
+        files.digest("/backup")
+
+
+def test_empty_backup_digest(files):
+    put(files, "/backup", b"")
+    assert files.digest("/backup") == H.plan.sha(b"")

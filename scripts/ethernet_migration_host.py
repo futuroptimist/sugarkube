@@ -10,6 +10,7 @@ import argparse
 import base64
 import copy
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -89,6 +90,57 @@ class Files:
                 )
                 plan.require(info.st_size <= 128 * 1024 * 1024, "input file too large")
                 return handle.read()
+
+    def digest(self, path, *, clock=time.monotonic, max_bytes=1 << 40, max_seconds=120):
+        """Stream large backup evidence without treating it as a small JSON input."""
+        started = clock()
+        with self.parent(path) as (parent, name):
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            with os.fdopen(fd, "rb") as handle:
+                before = os.fstat(handle.fileno())
+                self.trusted(before)
+                plan.require(
+                    stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
+                    "single-link regular backup required",
+                )
+                plan.require(0 <= before.st_size <= max_bytes, "backup exceeds streaming bound")
+
+                def identity(info):
+                    return (
+                        info.st_dev,
+                        info.st_ino,
+                        info.st_size,
+                        info.st_mtime_ns,
+                        info.st_ctime_ns,
+                        info.st_uid,
+                        info.st_gid,
+                        info.st_mode,
+                        info.st_nlink,
+                    )
+
+                digest = hashlib.sha256()
+                remaining = before.st_size
+                while remaining:
+                    plan.require(
+                        0 <= clock() - started <= max_seconds,
+                        "backup verification time budget exceeded",
+                    )
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    plan.require(bool(chunk), "backup truncated during verification")
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                plan.require(not handle.read(1), "backup grew during verification")
+                after = os.fstat(handle.fileno())
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                plan.require(
+                    identity(before) == identity(after) == identity(current),
+                    "backup changed during verification",
+                )
+                plan.require(
+                    0 <= clock() - started <= max_seconds,
+                    "backup verification time budget exceeded",
+                )
+                return digest.hexdigest()
 
     def metadata(self, path, digest_kind="raw-sha256"):
         with self.parent(path) as (parent, name):
@@ -346,7 +398,7 @@ class HostBackend:
             ("restore_evidence_path", evidence["restore_evidence_sha256"]),
         ):
             plan.require(
-                plan.sha(self.files.read(evidence[path_key])) == digest,
+                self.files.digest(evidence[path_key]) == digest,
                 "backup or restore evidence changed",
             )
         self.inactive(TIMER)
