@@ -2174,9 +2174,9 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
         m["hostname"] for m in backend.e["members"] if m["id"] != backend.e["local_member_id"]
     )
     values = backend.etcd(host, "get", KEY).get("kvs", [])
-    token = json.dumps(owner, sort_keys=True, separators=(",", ":"))
+    lock_value = json.dumps(owner, sort_keys=True, separators=(",", ":"))
     require(
-        len(values) == 1 and values[0].get("value") == encode(token),
+        len(values) == 1 and values[0].get("value") == encode(lock_value),
         "migration cluster owner mismatch",
     )
     invocation = migration_service_context(backend, phase)

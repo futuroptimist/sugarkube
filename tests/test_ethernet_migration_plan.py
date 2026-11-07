@@ -1,6 +1,7 @@
 """Offline planner tests: fabricated evidence is not K3s qualification."""
 
 import copy
+import gzip
 import importlib.util
 import io
 import json
@@ -291,17 +292,26 @@ def test_known_rendered_bytes(label, evidence):
     e = M.parse(evidence["enrollment_json"])
     artifacts = M.artifacts(catalog, e, label, evidence["layout"]["descriptor"])
     for fixture in FIXTURES.glob(f"{label}-*"):
-        name = fixture.name.removeprefix(label + "-")
+        name = fixture.name.removeprefix(label + "-").removesuffix(".gz")
+        data = (
+            gzip.decompress(fixture.read_bytes())
+            if fixture.suffix == ".gz"
+            else fixture.read_bytes()
+        )
         path = next(p for p in artifacts if Path(p).name == name)
-        assert artifacts[path] == M.sha(fixture.read_bytes())
+        assert artifacts[path] == M.sha(data)
     if label == "target":
         for path, digest in catalog["artifacts"][label]["runtime_sha256"].items():
             name = Path(path).name.replace(
                 "ethernet-quorum-recover.py", "ethernet_quorum_recover.py"
             )
-            historical = FIXTURES / ("target-" + Path(path).name)
-            source = historical if historical.exists() else ROOT / "scripts" / name
-            assert M.sha(source.read_bytes()) == digest
+            historical = FIXTURES / ("target-" + Path(path).name + ".gz")
+            data = (
+                gzip.decompress(historical.read_bytes())
+                if historical.exists()
+                else (ROOT / "scripts" / name).read_bytes()
+            )
+            assert M.sha(data) == digest
 
 
 @pytest.mark.parametrize(

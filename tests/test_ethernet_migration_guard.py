@@ -14,9 +14,9 @@ def checked_invocation():
 
 
 class Backend:
-    def __init__(self, enrollment, token):
+    def __init__(self, enrollment, lock_value):
         self.e = enrollment
-        self.token = token
+        self.lock_value = lock_value
         self.calls = []
         self.ip = enrollment["local_ipv4"]
 
@@ -25,7 +25,7 @@ class Backend:
 
     def etcd(self, host, verb, key):
         assert verb == "get" and key == M.KEY
-        return {"kvs": [{"value": M.encode(self.token)}]}
+        return {"kvs": [{"value": M.encode(self.lock_value)}]}
 
     def config(self):
         self.calls.append("config")
@@ -104,7 +104,7 @@ def test_changed_baseline_refuses_without_consumption(case, change):
     elif change == "node-intent":
         (state / "node-address.json").write_text("{}")
     elif change == "owner":
-        backend.token = "other"
+        backend.lock_value = "other"
     else:
         bad = copy.deepcopy(permit)
         bad["owner"]["operation_id"] = "f" * 64
