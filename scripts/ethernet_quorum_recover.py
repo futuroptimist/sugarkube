@@ -18,6 +18,7 @@ import http.client
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 import re
 import shlex
@@ -2122,11 +2123,18 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
         def finite(_):
             raise Stop("nonfinite migration JSON number")
 
+        def number(text):
+            value = float(text)
+            require(math.isfinite(value), "nonfinite migration JSON number")
+            return value
+
         with path.open("rb") as handle:
             raw = handle.read(max_bytes + 1)
         require(len(raw) <= max_bytes, "migration record too large")
         try:
-            value = json.loads(raw, object_pairs_hook=pairs, parse_constant=finite)
+            value = json.loads(
+                raw, object_pairs_hook=pairs, parse_constant=finite, parse_float=number
+            )
         except (ValueError, RecursionError) as exc:
             raise Stop("invalid migration record JSON") from exc
         require(type(value) is dict, "invalid migration record")

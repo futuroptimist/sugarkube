@@ -256,6 +256,8 @@ def test_completed_guard_still_rejects_enrollment_content_change(case, change):
     [
         ('{"armed":true,"armed":true}', "duplicate"),
         ('{"unexpected":NaN}', "nonfinite"),
+        ('{"unexpected":1e999}', "nonfinite"),
+        ('{"unexpected":-1e999}', "nonfinite"),
         ("[]", "invalid migration record"),
     ],
 )
