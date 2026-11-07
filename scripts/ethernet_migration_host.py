@@ -16,6 +16,7 @@ import json
 import os
 import secrets
 import stat
+import subprocess
 import sys
 import time
 import types
@@ -53,6 +54,21 @@ TIMER = "sugarkube-ethernet-recovery.timer"
 WATCHER = "sugarkube-ethernet-recovery.service"
 DNS = "sugarkube-ethernet-dns.service"
 NETWORK = "/etc/rancher/k3s/config.yaml.d/20-sugarkube-network.yaml"
+LIFECYCLE_TIMEOUTS = {
+    ("start", "k3s.service"): 420,
+    ("stop", "k3s.service"): 180,
+    ("start", DNS): 45,
+    ("stop", DNS): 30,
+    ("daemon-reload",): 30,
+    ("start", TIMER): 30,
+}
+LIFECYCLE_BUDGET = 600
+COMPLETION_BUDGET = 120
+COMPLETION_ATTEMPTS = 61
+
+
+class ReadinessPending(plan.Refused):
+    """Only explicit read-only convergence conditions may be polled."""
 
 
 class Files:
@@ -338,6 +354,13 @@ class HostBackend:
         self.lock = None
         self.written = {}
         self.sequence = 0
+        self.lifecycle_attempts = set()
+        self.lifecycle_failed = False
+        self.lifecycle_started = None
+        self.lifecycle_clock = time.monotonic
+        self.lifecycle_runner = subprocess.run
+        self.completion_clock = time.monotonic
+        self.completion_sleep = time.sleep
         validate_receipt(receipt, bundle, approved_plan, wall())
 
     def installed_backend(self, enrollment, target=True):
@@ -358,10 +381,53 @@ class HostBackend:
         module = types.ModuleType("sugarkube_migration_installed_controller")
         module.__file__ = path
         exec(compile(raw, path, "exec"), module.__dict__)
+        self.backend_stop_type = module.Stop
         return module.Backend(enrollment)
 
     def command(self, *args):
+        if args and args[0] in {"start", "stop", "daemon-reload"}:
+            return self.lifecycle(args)
+        plan.require(args and args[0] == "show", "unsupported systemctl operation")
         return self.backend.command(["/usr/bin/systemctl", *args])
+
+    def lifecycle(self, operation):
+        """One bounded systemd job, without changing unit timeouts or retrying."""
+        plan.require(operation in LIFECYCLE_TIMEOUTS, "unsupported lifecycle operation")
+        plan.require(operation not in self.lifecycle_attempts, "lifecycle replay refused")
+        plan.require(
+            not self.lifecycle_failed, "lifecycle failure latched; reconcile before other jobs"
+        )
+        now = self.lifecycle_clock()
+        if self.lifecycle_started is None:
+            self.lifecycle_started = now
+        elapsed = now - self.lifecycle_started
+        plan.require(0 <= elapsed < LIFECYCLE_BUDGET, "lifecycle total budget exhausted")
+        timeout = min(LIFECYCLE_TIMEOUTS[operation], LIFECYCLE_BUDGET - elapsed)
+        # Record before dispatch. A timeout can leave the systemd job running;
+        # neither this object nor the durable-intent executor may resubmit it.
+        self.lifecycle_attempts.add(operation)
+        self.lifecycle_failed = True
+        try:
+            result = self.lifecycle_runner(
+                ["/usr/bin/systemctl", *operation],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=True,
+                env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise plan.Refused("lifecycle timeout; outcome uncertain; no replay") from exc
+        except subprocess.CalledProcessError as exc:
+            raise plan.Refused("lifecycle job failed; preserve intent and reconcile") from exc
+        except OSError as exc:
+            raise plan.Refused("lifecycle dispatch uncertain; no replay") from exc
+        plan.require(
+            0 <= self.lifecycle_clock() - now <= timeout,
+            "lifecycle deadline exceeded; outcome uncertain; no replay",
+        )
+        self.lifecycle_failed = False
+        return result.stdout
 
     def inactive(self, unit):
         value = self.command("show", unit, "--property=ActiveState,SubState")
@@ -436,6 +502,7 @@ class HostBackend:
         self.backend.config()
 
     def remote_proof(self, expected_lock=None):
+        ready = True
         members = self.bundle["health"]["members"]
         expected_members = {
             mid: {"ID": mid, "name": row["name"], "peerURLs": row["peer_urls"]}
@@ -479,12 +546,12 @@ class HostBackend:
                 and node["metadata"]["name"] == row["node_name"]
                 and annotations.get("k3s.io/internal-ip") == row["annotation_ip"]
                 and annotations.get("etcd.k3s.cattle.io/node-name") == row["name"]
-                and internal == [row["internal_ip"]]
-                and any(
-                    c.get("type") == "Ready" and c.get("status") == "True"
-                    for c in node["status"].get("conditions", [])
-                ),
+                and internal == [row["internal_ip"]],
                 "Node drift",
+            )
+            ready = ready and any(
+                c.get("type") == "Ready" and c.get("status") == "True"
+                for c in node["status"].get("conditions", [])
             )
             for enrolled in self.e["members"]:
                 values = self.backend.etcd(
@@ -503,6 +570,9 @@ class HostBackend:
             plan.require(
                 len(values) <= 1 and actual_lock == expected_lock, "membership lock changed"
             )
+
+        if not ready:
+            raise ReadinessPending("original Node readiness pending")
 
     def capture(self, nonce):
         self.check_gates(frozenset(apply_module.GATES))
@@ -657,13 +727,50 @@ class HostBackend:
             and bool(consumed.get("invocation_id")),
             "one-start permit was not consumed",
         )
+        self.consumed = consumed
         new = plan.parse(self.files.read(apply_module.ENROLLMENT))
         self.backend = self.backend_factory(new)
 
     def verify_completion(self, approved_plan, checks):
+        started = self.completion_clock()
+        for attempt in range(COMPLETION_ATTEMPTS):
+            plan.require(
+                0 <= self.completion_clock() - started < COMPLETION_BUDGET,
+                "completion readiness deadline exceeded; preserve intent",
+            )
+            try:
+                self.completion_once(approved_plan, checks)
+            except ReadinessPending:
+                elapsed = self.completion_clock() - started
+                plan.require(
+                    0 <= elapsed < COMPLETION_BUDGET and attempt + 1 < COMPLETION_ATTEMPTS,
+                    "completion readiness deadline exceeded; preserve intent",
+                )
+                self.completion_sleep(min(2, COMPLETION_BUDGET - elapsed))
+            else:
+                plan.require(
+                    0 <= self.completion_clock() - started <= COMPLETION_BUDGET,
+                    "completion verification deadline exceeded",
+                )
+                return
+
+    def completion_once(self, approved_plan, checks):
         plan.require(
             checks == apply_module.CHECKS and approved_plan == self.plan, "unknown completion scope"
         )
+        intent = plan.parse(self.files.read(STATE + "/migration-intent.json"))
+        permit = plan.parse(self.files.read(STATE + "/migration-start-permit.json"))
+        consumed = plan.parse(self.files.read(STATE + "/migration-start-consumed.json"))
+        plan.require(
+            permit == self.permit
+            and consumed == self.consumed
+            and all(intent.get(key) == value for key, value in self.permit.items()),
+            "migration activation receipts changed",
+        )
+        invocation = self.command(
+            "show", "k3s.service", "--property=InvocationID", "--value"
+        ).strip()
+        plan.require(invocation == self.consumed["invocation_id"], "K3s invocation changed")
         new = plan.parse(self.files.read(apply_module.ENROLLMENT))
         plan.require(
             plan.sha(plan.canonical(new)) == self.plan["new_enrollment_canonical_sha256"],
@@ -688,7 +795,21 @@ class HostBackend:
         )
         self.remote_proof(plan.canonical(self.owner).decode() if self.owner else None)
         self.pod_dns()
-        self.backend.workloads(self.e["members"][0]["hostname"])
+        try:
+            self.backend.workloads(self.e["members"][0]["hostname"])
+        except RuntimeError as exc:
+            pending = {
+                "workload Pod completion pending",
+                "workload controller has not observed desired state",
+                "DaemonSet completion pending",
+                "workload replicas not Ready",
+            }
+            if (
+                type(exc) is getattr(self, "backend_stop_type", recovery.Stop)
+                and str(exc) in pending
+            ):
+                raise ReadinessPending("workload readiness pending") from exc
+            raise
 
     def pod_dns(self):
         probe = self.receipt["pod_dns"]
@@ -709,6 +830,13 @@ class HostBackend:
             and probe["container"] in {c["name"] for c in pod["spec"]["containers"]},
             "probe pod identity or placement changed",
         )
+        status = pod.get("status", {})
+        plan.require(status.get("phase") in {"Pending", "Running"}, "probe pod phase changed")
+        if status["phase"] != "Running" or not any(
+            row.get("type") == "Ready" and row.get("status") == "True"
+            for row in status.get("conditions", [])
+        ):
+            raise ReadinessPending("probe pod readiness pending")
         output = self.backend.command(
             base
             + [

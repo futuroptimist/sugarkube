@@ -127,8 +127,25 @@ start. Post-start must belong to that same systemd invocation. Neither path call
 normal recovery logic or changes the original incident. An unknown startup result
 cannot reuse the permit.
 
-The adapter reacquires the local lock after activation. Before releasing its
-cluster lock it verifies exact files and enrollment, preserved identities and
+Lifecycle jobs use a separate allowlisted runner, not the 12-second read-only
+probe deadline. Caller limits are 420 seconds for K3s start, 180 for K3s stop,
+45/30 for resolver start/stop, and 30 for reload or timer start, within a
+600-second cumulative lifecycle budget. Existing systemd unit timeout settings
+are unchanged. Each operation is recorded before dispatch; definitive failure,
+unknown dispatch or timeout never triggers another submission. A timeout may
+leave a systemd job running and requires reconciliation.
+
+The adapter reacquires the local lock after activation. Completion allows normal
+Node, pod and workload readiness to converge under a 120-second polling budget
+and at most 61 read-only attempts, with bounded delays. No new attempt starts
+after that budget. Time spent reading counts toward the budget, and an overdue
+proof cannot report completion. An already-running read remains subject to its
+own bounded probe timeout before control returns. Every attempt rechecks immutable facts,
+exact ownership and the consumed startup permit. Only specifically classified
+readiness conditions are pending; identity, artifact, trust or unknown failures
+refuse immediately. Activation and other mutations are never retried.
+
+Before releasing its cluster lock it verifies exact files and enrollment, preserved identities and
 journals, authenticated original quorum and Nodes, loaded units and real resolver
 process views, existing-pod DNS and workload HTTPS. It releases only its exact
 owner with compare-and-set, records completion and then resumes the local timer.

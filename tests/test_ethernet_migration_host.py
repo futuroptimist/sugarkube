@@ -15,6 +15,14 @@ from test_ethernet_migration_apply import case as core_case  # noqa: E402,F401
 from test_ethernet_migration_guard import Backend as GuardBackend  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def forbid_live_subprocess(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("offline tests must inject lifecycle subprocess")
+
+    monkeypatch.setattr(H.subprocess, "run", forbidden)
+
+
 @pytest.fixture
 def files(tmp_path):
     tmp_path.chmod(0o700)
@@ -437,6 +445,9 @@ def test_stop_preservation_and_replace_dispatch(files, monkeypatch):
     host, fake = adapter(bundle, files)
     commands = []
     fake.command = lambda argv: commands.append(argv) or "ActiveState=inactive\nSubState=dead\n"
+    host.lifecycle_runner = lambda argv, **kwargs: commands.append(
+        argv
+    ) or H.subprocess.CompletedProcess(argv, 0, "")
     host.stop_local_services()
     assert commands[:2] == [
         ["/usr/bin/systemctl", "stop", "k3s.service"],
@@ -494,6 +505,7 @@ def test_existing_local_pod_dns_probe(files, drift):
         return H.json.dumps(
             {
                 "metadata": {"uid": "wrong" if drift == "uid" else "uid"},
+                "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]},
                 "spec": {
                     "nodeName": "wrong" if drift == "placement" else "pi1",
                     "containers": [{"name": "main"}],
@@ -510,13 +522,26 @@ def test_existing_local_pod_dns_probe(files, drift):
         assert calls[-1][-4:] == ["--", "getent", "ahostsv4", "example.test"]
 
 
-def test_completion_checks_target_preservation_and_timer(files, monkeypatch):
+@pytest.fixture
+def completion_case(files, monkeypatch):
     bundle = fixtures.sample()
     host, fake = adapter(bundle, files)
     raw = bundle["enrollment_json"].encode()
     host.plan = {"new_enrollment_canonical_sha256": H.plan.sha(H.plan.canonical(host.e))}
     host.written = {"/target": H.plan.sha(b"target")}
-    monkeypatch.setattr(files, "read", lambda path: b"target" if path == "/target" else raw)
+    host.permit = {
+        "schema_version": 1,
+        "owner": {"operation_id": "a" * 64, "plan_sha256": "b" * 64},
+    }
+    host.consumed = {**host.permit, "invocation_id": "a" * 32}
+    records = {
+        H.apply_module.ENROLLMENT: raw,
+        "/target": b"target",
+        H.STATE + "/migration-intent.json": H.plan.canonical(host.permit),
+        H.STATE + "/migration-start-permit.json": H.plan.canonical(host.permit),
+        H.STATE + "/migration-start-consumed.json": H.plan.canonical(host.consumed),
+    }
+    monkeypatch.setattr(files, "read", lambda path: records[path])
     metadata = {
         p: r for section in ("observed", "state_metadata") for p, r in bundle[section].items()
     }
@@ -525,9 +550,15 @@ def test_completion_checks_target_preservation_and_timer(files, monkeypatch):
     fake.config = lambda: checked.append("config")
     fake.local_database = lambda: host.e["local_database"]
     fake.workloads = lambda host: checked.append("workloads")
-    fake.command = lambda argv: "active\n"
+    fake.command = lambda argv: "a" * 32 if "--property=InvocationID" in argv else "active\n"
     host.pod_dns = lambda: checked.append("pod")
+    return host, fake, checked, records
+
+
+def test_completion_checks_target_preservation_and_timer(completion_case):
+    host, fake, checked, records = completion_case
     host.verify_completion(host.plan, H.apply_module.CHECKS)
+    host.lifecycle_runner = lambda argv, **kwargs: H.subprocess.CompletedProcess(argv, 0, "")
     host.resume_timer()
     host.verify_timer_and_completion(host.plan, H.apply_module.CHECKS)
     assert checked == ["config", "pod", "workloads"] * 2
@@ -600,7 +631,10 @@ def test_installed_backend_executes_only_fixed_path_pinned_bytes(files, monkeypa
     host, _ = adapter(fixtures.sample(), files)
     with pytest.raises(H.plan.Refused, match="actual host root"):
         host.installed_backend(host.e)
-    raw = b"class Backend:\n    def __init__(self, enrollment):\n        self.e = enrollment\n"
+    raw = (
+        b"class Stop(RuntimeError): pass\nclass Backend:\n"
+        b"    def __init__(self, enrollment):\n        self.e = enrollment\n"
+    )
     controller = "/usr/local/libexec/sugarkube/ethernet-quorum-recover.py"
     catalog = {
         "artifacts": {
@@ -815,3 +849,277 @@ def test_network_backup_failure_precedes_start_permit(files, monkeypatch):
         host.activate_local_services()
     assert not (files.root / H.STATE.lstrip("/") / "migration-start-permit.json").exists()
     assert fake.calls == []
+
+
+@pytest.mark.parametrize(
+    "operation,duration",
+    [(("start", "k3s.service"), 65), (("stop", "k3s.service"), 90), (("start", H.DNS), 20)],
+)
+def test_lifecycle_allows_valid_jobs_longer_than_probe_timeout(files, operation, duration):
+    host, _ = adapter(fixtures.sample(), files)
+    now, calls = [0], []
+    host.lifecycle_clock = lambda: now[0]
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        now[0] += duration
+        return H.subprocess.CompletedProcess(argv, 0, "done")
+
+    host.lifecycle_runner = run
+    assert host.command(*operation) == "done"
+    assert calls[0][1]["timeout"] == H.LIFECYCLE_TIMEOUTS[operation]
+    assert set(calls[0][1]["env"]) == {"PATH"}
+    assert calls[0][1]["check"] is True
+    with pytest.raises(H.plan.Refused, match="replay"):
+        host.command(*operation)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "failure,diagnostic",
+    [
+        ("timeout", "outcome uncertain"),
+        ("failed", "job failed"),
+        ("os", "dispatch uncertain"),
+        ("late", "deadline exceeded"),
+    ],
+)
+def test_lifecycle_unknown_or_failed_jobs_are_never_replayed(files, failure, diagnostic):
+    host, _ = adapter(fixtures.sample(), files)
+    now, calls = [0], []
+    host.lifecycle_clock = lambda: now[0]
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if failure == "timeout":
+            raise H.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "failed":
+            raise H.subprocess.CalledProcessError(1, argv)
+        if failure == "os":
+            raise OSError("dispatch status unknown")
+        now[0] += kwargs["timeout"] + 1
+        return H.subprocess.CompletedProcess(argv, 0, "late")
+
+    host.lifecycle_runner = run
+    with pytest.raises(H.plan.Refused, match=diagnostic):
+        host.command("start", "k3s.service")
+    with pytest.raises(H.plan.Refused, match="replay"):
+        host.command("start", "k3s.service")
+    with pytest.raises(H.plan.Refused, match="failure latched"):
+        host.command("daemon-reload")
+    assert len(calls) == 1
+
+
+def test_cumulative_lifecycle_budget_bounds_next_mutation(files):
+    host, _ = adapter(fixtures.sample(), files)
+    now, timeouts = [0], []
+    host.lifecycle_clock = lambda: now[0]
+
+    def run(argv, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        now[0] += kwargs["timeout"]
+        return H.subprocess.CompletedProcess(argv, 0, "")
+
+    host.lifecycle_runner = run
+    host.command("start", "k3s.service")  # 420 seconds consumed.
+    now[0] += 170  # Includes read-only convergence/check time.
+    host.command("start", H.TIMER)  # Remaining10 seconds, not a new30-second budget.
+    assert timeouts == [420, 10]
+    with pytest.raises(H.plan.Refused, match="total budget"):
+        host.command("daemon-reload")
+    assert len(timeouts) == 2
+    assert ("daemon-reload",) not in host.lifecycle_attempts
+
+
+@pytest.mark.parametrize("operation", [("restart", "k3s.service"), ("start", "other.service"), ()])
+def test_dispatcher_rejects_unapproved_systemctl_operations(files, operation):
+    host, _ = adapter(fixtures.sample(), files)
+    with pytest.raises(H.plan.Refused, match="unsupported"):
+        host.command(*operation)
+    assert not host.lifecycle_attempts
+
+
+def completion_clock(host):
+    now = [0]
+    host.completion_clock = lambda: now[0]
+    host.completion_sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+    return now
+
+
+def test_transient_node_readiness_rechecks_full_attempt_then_succeeds(completion_case, monkeypatch):
+    host, fake, checked, records = completion_case
+    completion_clock(host)
+    original_node, calls = fake.node, []
+    reads = []
+    monkeypatch.setattr(host.files, "read", lambda path: reads.append(path) or records[path])
+
+    def node(endpoint, name):
+        calls.append(name)
+        row = original_node(endpoint, name)
+        if len(calls) <= 3:
+            row["status"]["conditions"][0]["status"] = "False"
+        return row
+
+    fake.node = node
+    host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert len(calls) == 6
+    assert checked.count("config") == 2
+    assert reads.count(H.STATE + "/migration-intent.json") == 2
+    assert reads.count(H.STATE + "/migration-start-consumed.json") == 2
+    assert not host.lifecycle_attempts
+
+
+def test_unready_node_never_masks_later_identity_drift(files):
+    host, fake = adapter(fixtures.sample(), files)
+    original = fake.node
+
+    def node(endpoint, name):
+        row = original(endpoint, name)
+        if name == "pi1":
+            row["status"]["conditions"][0]["status"] = "False"
+        if name == "pi2":
+            row["metadata"]["uid"] = "changed"
+        return row
+
+    fake.node = node
+    with pytest.raises(H.plan.Refused, match="Node drift") as error:
+        host.remote_proof()
+    assert not isinstance(error.value, H.ReadinessPending)
+
+
+@pytest.mark.parametrize("change", ["fingerprint", "permit", "owner", "invocation"])
+def test_pending_completion_does_not_retry_invariant_failure(completion_case, change):
+    host, fake, checked, records = completion_case
+    now = completion_clock(host)
+    calls = []
+
+    def workloads(endpoint):
+        calls.append(endpoint)
+        raise H.recovery.Stop("workload replicas not Ready")
+
+    fake.workloads = workloads
+
+    def sleep(seconds):
+        now[0] += seconds
+        if change == "fingerprint":
+            records["/target"] = b"changed"
+        elif change == "permit":
+            records[H.STATE + "/migration-start-consumed.json"] = b"{}"
+        elif change == "owner":
+            fake.lock = "changed-owner"
+        else:
+            fake.command = lambda argv: "different-invocation"
+
+    host.completion_sleep = sleep
+    with pytest.raises(H.plan.Refused) as error:
+        host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert not isinstance(error.value, H.ReadinessPending)
+    assert len(calls) == 1
+    assert not host.lifecycle_attempts
+
+
+def test_transient_workload_readiness_converges_without_mutation(completion_case):
+    host, fake, checked, records = completion_case
+    completion_clock(host)
+    calls = []
+
+    def workloads(endpoint):
+        calls.append(endpoint)
+        if len(calls) < 3:
+            raise H.recovery.Stop("workload Pod completion pending")
+
+    fake.workloads = workloads
+    host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert len(calls) == 3 and checked.count("config") == 3
+    assert not host.lifecycle_attempts
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_completion_wait_is_bounded_even_if_clock_does_not_advance(completion_case, frozen):
+    host, fake, checked, records = completion_case
+    completion_clock(host)
+    if frozen:
+        host.completion_sleep = lambda seconds: None
+    calls = []
+
+    def workloads(endpoint):
+        calls.append(endpoint)
+        raise H.recovery.Stop("DaemonSet completion pending")
+
+    fake.workloads = workloads
+    with pytest.raises(H.plan.Refused, match="readiness deadline"):
+        host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert len(calls) == (H.COMPLETION_ATTEMPTS if frozen else H.COMPLETION_BUDGET // 2)
+    assert not host.lifecycle_attempts
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [H.recovery.Stop("authenticated RPC failed"), RuntimeError("workload replicas not Ready")],
+)
+def test_completion_does_not_retry_unclassified_errors(completion_case, failure):
+    host, fake, checked, records = completion_case
+    host.completion_sleep = lambda seconds: pytest.fail("must not retry")
+
+    def workloads(endpoint):
+        raise failure
+
+    fake.workloads = workloads
+    with pytest.raises(type(failure)):
+        host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert checked.count("config") == 1
+
+
+def test_slow_successful_completion_still_has_overall_deadline(completion_case):
+    host, fake, checked, records = completion_case
+    times = iter([0, 0, H.COMPLETION_BUDGET + 1])
+    host.completion_clock = lambda: next(times)
+    with pytest.raises(H.plan.Refused, match="verification deadline"):
+        host.verify_completion(host.plan, H.apply_module.CHECKS)
+
+
+@pytest.mark.parametrize("phase", ["Pending", "Running"])
+def test_probe_pod_pending_is_classified_before_exec(files, phase):
+    host, fake = adapter(fixtures.sample(), files)
+    calls = []
+
+    def command(argv):
+        calls.append(argv)
+        return H.json.dumps(
+            {
+                "metadata": {"uid": "uid"},
+                "spec": {"nodeName": "pi1", "containers": [{"name": "main"}]},
+                "status": {"phase": phase, "conditions": []},
+            }
+        )
+
+    fake.command = command
+    with pytest.raises(H.ReadinessPending, match="probe pod"):
+        host.pod_dns()
+    assert len(calls) == 1 and "exec" not in calls[0]
+
+
+@pytest.mark.parametrize("advance", [H.COMPLETION_BUDGET + 1, -1])
+def test_completion_oversleep_or_clock_anomaly_forbids_new_proof(completion_case, advance):
+    host, fake, checked, records = completion_case
+    now = completion_clock(host)
+    calls = []
+
+    def workloads(endpoint):
+        calls.append(endpoint)
+        raise H.recovery.Stop("workload replicas not Ready")
+
+    fake.workloads = workloads
+    host.completion_sleep = lambda seconds: now.__setitem__(0, now[0] + advance)
+    with pytest.raises(H.plan.Refused, match="readiness deadline"):
+        host.verify_completion(host.plan, H.apply_module.CHECKS)
+    assert len(calls) == checked.count("config") == 1
+
+
+def test_lifecycle_clock_going_backwards_refuses_before_mutation(files):
+    host, _ = adapter(fixtures.sample(), files)
+    host.lifecycle_started = 100
+    host.lifecycle_clock = lambda: 99
+    with pytest.raises(H.plan.Refused, match="total budget"):
+        host.command("start", "k3s.service")
+    assert not host.lifecycle_attempts
