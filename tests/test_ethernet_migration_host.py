@@ -135,6 +135,9 @@ class FakeProbe:
         self.drift = None
         self.lock = None
 
+    def network(self, ip):
+        assert ip == self.e["local_ipv4"]
+
     def close(self):
         self.calls.append("close")
 
@@ -203,6 +206,7 @@ class FakeProbe:
 
 
 def adapter(bundle, files):
+    put(files, H.NETWORK, b"original-network-yaml", 0o640)
     fake = FakeProbe(bundle)
     return H.HostBackend(bundle, {}, receipt(bundle), files, fake, wall=lambda: 150), fake
 
@@ -311,6 +315,7 @@ def test_core_adapter_real_guard(core_case, files, monkeypatch):  # noqa: F811
     r = receipt(bundle)
     r["plan_sha256"] = H.plan.sha(H.plan.canonical(approved))
     host = H.HostBackend(bundle, approved, r, files, FakeProbe(bundle), wall=lambda: 150)
+    put(files, H.NETWORK, b"original-network-yaml", 0o640)
     state = files.root / H.STATE.lstrip("/")
     state.mkdir(parents=True)
     put(files, H.STATE + "/incident.json", bundle["journals"]["incident_json"].encode())
@@ -728,3 +733,85 @@ def test_backup_digest_rejects_untrusted_file_types(files, kind):
 def test_empty_backup_digest(files):
     put(files, "/backup", b"")
     assert files.digest("/backup") == H.plan.sha(b"")
+
+
+def test_earlier_network_hook_drift_keeps_backup_and_guard_blocks_recovery(files, monkeypatch):
+    bundle = fixtures.sample()
+    host, fake = adapter(bundle, files)
+    original = (
+        b'# Managed by configure_k3s_node_ip.sh\nnode-ip: "192.0.2.1"\n' b'flannel-iface: "eth0"\n'
+    )
+    put(files, H.NETWORK, original, 0o640)
+    put(files, H.STATE + "/incident.json", bundle["journals"]["incident_json"].encode())
+    enrollment = put(files, H.apply_module.ENROLLMENT, bundle["enrollment_json"].encode())
+    state = files.root / H.STATE.lstrip("/")
+    host.owner = {"operation_id": "a" * 64, "plan_sha256": "b" * 64}
+    host.lock = 123
+    intent = {
+        "schema_version": 1,
+        "owner": host.owner,
+        "plan_sha256": host.owner["plan_sha256"],
+        "target_enrollment_sha256": H.plan.sha(enrollment.read_bytes()),
+        "incident_sha256": H.plan.sha(bundle["journals"]["incident_json"].encode()),
+        "baseline_ipv4": "192.0.2.1",
+        "cluster_id": "100",
+        "local_member_id": "1",
+    }
+    H.apply_module.IntentStore(state).reserve(intent)
+    monkeypatch.setattr(H.fcntl, "flock", lambda fd, flags: None)
+    monkeypatch.setattr(H.recovery, "trusted_file", lambda path: None)
+    monkeypatch.setattr(H.recovery, "migration_service_context", lambda backend, phase: "a" * 32)
+    guard = GuardBackend(host.e, H.plan.canonical(host.owner).decode())
+    hooks, normal_recovery = [], []
+
+    def command(*args):
+        if args == ("start", "k3s.service"):
+            # systemd executes20-sugarkube-network before30-quorum-recovery.
+            hooks.append("20-network-refresh")
+            put(files, H.NETWORK, original.replace(b"192.0.2.1", b"192.0.2.99"), 0o640)
+            guard.ip = "192.0.2.99"
+            hooks.append("30-migration-guard")
+            result = H.recovery.migration_start_guard(enrollment, guard, state, "pre-start")
+            if result is None:
+                normal_recovery.append("must-not-run")
+
+    host.command = command
+    with pytest.raises(H.recovery.Stop, match="migration baseline changed"):
+        host.activate_local_services()
+    assert hooks == ["20-network-refresh", "30-migration-guard"]
+    assert normal_recovery == [] and guard.calls == []
+    assert files.read(H.STATE + "/migration-network-original") == original
+    record = H.plan.parse(files.read(H.STATE + "/migration-network-original.json"))
+    assert record["owner"] == host.owner and record["path"] == H.NETWORK
+    assert record["metadata"]["mode"] == 0o640
+    assert record["metadata"]["sha256"] == H.plan.sha(original)
+    assert files.read(H.NETWORK) != original  # No automatic rollback.
+    assert (state / "migration-intent.json").exists()
+    assert (state / "migration-start-permit.json").exists()
+    assert not (state / "migration-start-consumed.json").exists()
+    assert not (state / "migration-complete.json").exists()
+    assert (state / "incident.json").read_text() == bundle["journals"]["incident_json"]
+
+
+def test_network_backup_failure_precedes_start_permit(files, monkeypatch):
+    host, fake = adapter(fixtures.sample(), files)
+    host.owner = {"operation_id": "a" * 64, "plan_sha256": "b" * 64}
+    host.lock = 123
+    (files.root / H.STATE.lstrip("/")).mkdir(parents=True)
+    original_metadata = files.metadata
+    reads = 0
+
+    def drift(path, *args):
+        nonlocal reads
+        record = original_metadata(path, *args)
+        if path == H.NETWORK:
+            reads += 1
+            if reads > 1:
+                record["sha256"] = "0" * 64
+        return record
+
+    monkeypatch.setattr(files, "metadata", drift)
+    with pytest.raises(H.plan.Refused, match="before backup"):
+        host.activate_local_services()
+    assert not (files.root / H.STATE.lstrip("/") / "migration-start-permit.json").exists()
+    assert fake.calls == []

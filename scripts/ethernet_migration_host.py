@@ -52,6 +52,7 @@ STATE = "/var/lib/sugarkube/ethernet-recovery"
 TIMER = "sugarkube-ethernet-recovery.timer"
 WATCHER = "sugarkube-ethernet-recovery.service"
 DNS = "sugarkube-ethernet-dns.service"
+NETWORK = "/etc/rancher/k3s/config.yaml.d/20-sugarkube-network.yaml"
 
 
 class Files:
@@ -606,10 +607,33 @@ class HostBackend:
         self.files.replace(path, old_digest, data, backup)
         self.written[path] = plan.sha(data)
 
+    def backup_dynamic_network(self):
+        """Preserve the earlier network hook's output before permitting activation."""
+        self.backend.network(self.e["local_ipv4"])
+        metadata = self.files.metadata(NETWORK)
+        original = self.files.read(NETWORK)
+        plan.require(
+            metadata["sha256"] == plan.sha(original) and self.files.metadata(NETWORK) == metadata,
+            "dynamic network configuration changed before backup",
+        )
+        backup = STATE + "/migration-network-original"
+        self.files.create(backup, original)
+        self.files.create(
+            backup + ".json",
+            plan.canonical(
+                {"owner": self.owner, "path": NETWORK, "metadata": metadata, "backup_path": backup}
+            ),
+        )
+        plan.require(
+            self.files.read(backup) == original and self.files.metadata(NETWORK) == metadata,
+            "dynamic network backup readback failed",
+        )
+
     def activate_local_services(self):
         plan.require(
             self.lock is not None and self.owner is not None, "missing migration ownership"
         )
+        self.backup_dynamic_network()
         self.permit = {
             "schema_version": 1,
             "owner": self.owner,
@@ -658,6 +682,7 @@ class HostBackend:
             if path != apply_module.ENROLLMENT:
                 plan.require(self.files.metadata(path) == expected, "journal changed")
         self.backend.config()  # includes loaded units, real namespace mounts and resolved IPC
+        self.backend.network(self.e["local_ipv4"])
         plan.require(
             self.backend.local_database() == self.e["local_database"], "database identity changed"
         )

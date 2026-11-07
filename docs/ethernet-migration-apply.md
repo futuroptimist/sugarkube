@@ -90,8 +90,18 @@ metadata and saves the original file for inspection, then syncs and verifies the
 new file. Enrollment is written last.
 
 Member, Node, machine and database identities, trust inventory, original recovery
-journal and unrelated enrollment fields remain unchanged. There is no reset,
+journal and unrelated enrollment fields remain unchanged. The standard dynamic
+network YAML has a separate startup boundary described below. There is no reset,
 member add/remove, Node patch, credential change or database restore in this path.
+
+Before activation, the adapter saves the exact bytes and metadata of the managed
+`20-sugarkube-network.yaml` file. The existing network refresh hook runs before the
+migration guard during service startup and may rewrite this dynamic YAML if DHCP
+changes in that interval. The migration guard then refuses the changed baseline
+before normal recovery or K3s starts. This is an explicit startup side-effect
+boundary, not a promise of zero file writes on failure. The saved original bytes
+and intent remain for operator review, with no automatic rollback. Successful
+completion checks the expected baseline network YAML again.
 
 The old controller cannot understand the new intent before it is replaced. The
 paused controllers, local lock, stopped services and explicit no-consumer proof
