@@ -26,7 +26,7 @@ def forbid_live_subprocess(monkeypatch):
 @pytest.fixture
 def files(tmp_path):
     tmp_path.chmod(0o700)
-    return H.Files(tmp_path, uid=os.geteuid())
+    return H.Files(tmp_path, uid=os.geteuid(), gid=os.getegid())
 
 
 def put(files, path, data=b"original", mode=0o640):
@@ -409,6 +409,12 @@ def test_capture_refreshes_challenge_after_local_and_remote_checks(files, monkey
     records.update({"/run/systemd/resolve/" + p: r for p, r in bundle["layout"]["entries"].items()})
     records["/run/sugarkube-ethernet-dns/resolved"] = {"kind": "absent"}
     monkeypatch.setattr(files, "metadata", lambda path, *args: records[path])
+    monkeypatch.setattr(files, "verify_resolv_link", lambda descriptor: None)
+    monkeypatch.setattr(
+        files,
+        "resolver_layout",
+        lambda descriptor: {key: bundle["layout"][key] for key in ("directory", "entries")},
+    )
     raw = {
         H.apply_module.ENROLLMENT: bundle["enrollment_json"].encode(),
         H.STATE + "/incident.json": bundle["journals"]["incident_json"].encode(),
@@ -800,7 +806,7 @@ def test_earlier_network_hook_drift_keeps_backup_and_guard_blocks_recovery(files
 
     def command(*args):
         if args == ("start", "k3s.service"):
-            # systemd executes20-sugarkube-network before30-quorum-recovery.
+            # systemd executes 20-sugarkube-network before 30-quorum-recovery.
             hooks.append("20-network-refresh")
             put(files, H.NETWORK, original.replace(b"192.0.2.1", b"192.0.2.99"), 0o640)
             guard.ip = "192.0.2.99"
@@ -923,7 +929,7 @@ def test_cumulative_lifecycle_budget_bounds_next_mutation(files):
     host.lifecycle_runner = run
     host.command("start", "k3s.service")  # 420 seconds consumed.
     now[0] += 170  # Includes read-only convergence/check time.
-    host.command("start", H.TIMER)  # Remaining10 seconds, not a new30-second budget.
+    host.command("start", H.TIMER)  # Remaining 10 seconds, not a new 30-second budget.
     assert timeouts == [420, 10]
     with pytest.raises(H.plan.Refused, match="total budget"):
         host.command("daemon-reload")
@@ -1123,3 +1129,333 @@ def test_lifecycle_clock_going_backwards_refuses_before_mutation(files):
     with pytest.raises(H.plan.Refused, match="total budget"):
         host.command("start", "k3s.service")
     assert not host.lifecycle_attempts
+
+
+def test_small_input_growth_after_stat_is_bounded_and_rejected(files, monkeypatch):
+    path = put(files, "/input", b"tiny")
+    monkeypatch.setattr(H, "MAX_INPUT_BYTES", 8)
+    original_trusted = files.trusted
+    original_fdopen = H.os.fdopen
+    sizes = []
+
+    def grow_after_stat(info):
+        original_trusted(info)
+        if H.stat.S_ISREG(info.st_mode):
+            path.write_bytes(b"x" * 100)
+
+    class BoundedReader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def read(self, size=-1):
+            sizes.append(size)
+            assert size == H.MAX_INPUT_BYTES + 1
+            return self.handle.read(size)
+
+    monkeypatch.setattr(files, "trusted", grow_after_stat)
+    monkeypatch.setattr(H.os, "fdopen", lambda *args: BoundedReader(original_fdopen(*args)))
+    with pytest.raises(H.plan.Refused, match="grew beyond read limit"):
+        files.read("/input")
+    assert sizes == [9]
+
+
+def test_small_input_at_exact_ceiling_is_accepted(files, monkeypatch):
+    monkeypatch.setattr(H, "MAX_INPUT_BYTES", 8)
+    put(files, "/input", b"12345678")
+    assert files.read("/input") == b"12345678"
+
+
+@pytest.fixture
+def resolved_layout(files, monkeypatch):
+    descriptor = {**H.plan.VIEW, "uid": 12345, "gid": 23456}
+    root = files.root / "run/systemd/resolve"
+    root.mkdir(parents=True)
+    for name in (
+        "resolv.conf",
+        "stub-resolv.conf",
+        "io.systemd.Resolve",
+        "io.systemd.Resolve.Monitor",
+    ):
+        put(
+            files,
+            "/run/systemd/resolve/" + name,
+            b"nameserver 127.0.0.53\n",
+            0o666 if name.startswith("io.") else 0o644,
+        )
+    owned = [root, *root.iterdir()]
+    if os.geteuid() == 0:
+        for path in owned:
+            os.chown(path, descriptor["uid"], descriptor["gid"])
+    # Nonroot CI runners model ownership; socket kinds are always metadata-only
+    # fixtures, never actual sockets or network endpoints.
+    ownership = {path.stat().st_ino: (descriptor["uid"], descriptor["gid"]) for path in owned}
+    socket_inodes = {path.stat().st_ino for path in owned if path.name.startswith("io.")}
+    real_stat, real_fstat = H.os.stat, H.os.fstat
+
+    class Info:
+        def __init__(self, info):
+            self.info = info
+
+        def __getattr__(self, key):
+            if key == "st_uid" and self.info.st_ino in ownership:
+                return ownership[self.info.st_ino][0]
+            if key == "st_gid" and self.info.st_ino in ownership:
+                return ownership[self.info.st_ino][1]
+            if key == "st_mode" and self.info.st_ino in socket_inodes:
+                return H.stat.S_IFSOCK | H.stat.S_IMODE(self.info.st_mode)
+            return getattr(self.info, key)
+
+    monkeypatch.setattr(H.os, "stat", lambda *args, **kwargs: Info(real_stat(*args, **kwargs)))
+    monkeypatch.setattr(H.os, "fstat", lambda *args, **kwargs: Info(real_fstat(*args, **kwargs)))
+    return descriptor, root, ownership, socket_inodes
+
+
+def test_descriptor_owned_layout_is_readable_without_widening_root_trust(files, resolved_layout):
+    descriptor, root, ownership, socket_inodes = resolved_layout
+    layout = files.resolver_layout(descriptor)
+    assert layout["directory"]["uid"] == 12345
+    assert layout["entries"]["resolv.conf"]["sha256"] == H.plan.sha(b"nameserver 127.0.0.53\n")
+    assert layout["entries"]["io.systemd.Resolve"]["kind"] == "socket"
+    assert layout["entries"]["io.systemd.Resolve"]["mode"] == 0o666
+    with pytest.raises(H.plan.Refused, match="untrusted path"):
+        files.read("/run/systemd/resolve/resolv.conf")
+    with pytest.raises(H.plan.Refused, match="untrusted path"):
+        files.replace(
+            "/run/systemd/resolve/resolv.conf",
+            H.plan.sha(b"nameserver 127.0.0.53\n"),
+            b"new",
+            "/backup",
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "descriptor",
+        "directory-owner",
+        "file-owner",
+        "file-group",
+        "ancestor",
+        "writable-file",
+        "writable-directory",
+        "extra",
+        "socket-type",
+        "symlink-file",
+        "symlink-directory",
+    ],
+)
+def test_resolver_layout_refuses_unapproved_scope_or_drift(files, resolved_layout, change):
+    descriptor, root, ownership, socket_inodes = resolved_layout
+    file = root / "resolv.conf"
+    if change == "descriptor":
+        descriptor["uid"] = True
+    elif change == "directory-owner":
+        ownership[root.stat().st_ino] = (0, 0)
+    elif change == "file-owner":
+        ownership[file.stat().st_ino] = (999, 23456)
+    elif change == "file-group":
+        ownership[file.stat().st_ino] = (12345, 999)
+    elif change == "ancestor":
+        (files.root / "run/systemd").chmod(0o777)
+    elif change == "writable-file":
+        file.chmod(0o666)
+    elif change == "writable-directory":
+        root.chmod(0o777)
+    elif change == "extra":
+        (root / "unexpected").write_bytes(b"extra")
+    elif change == "socket-type":
+        socket_inodes.clear()
+    elif change == "symlink-file":
+        file.unlink()
+        file.symlink_to("stub-resolv.conf")
+    else:
+        root.rename(root.with_name("prior"))
+        root.symlink_to("prior", target_is_directory=True)
+    with pytest.raises((H.plan.Refused, OSError)):
+        files.resolver_layout(descriptor)
+
+
+def test_resolver_inspection_detects_file_growth(files, resolved_layout, monkeypatch):
+    descriptor, root, ownership, socket_inodes = resolved_layout
+    real_fdopen = H.os.fdopen
+
+    def grow_on_open(*args):
+        handle = real_fdopen(*args)
+        with (root / "resolv.conf").open("ab") as writer:
+            writer.write(b"changed")
+        return handle
+
+    monkeypatch.setattr(H.os, "fdopen", grow_on_open)
+    with pytest.raises(H.plan.Refused, match="changed during open"):
+        files.resolver_layout(descriptor)
+
+
+@pytest.mark.parametrize("kind", ["exact", "absolute", "equivalent", "regular", "missing"])
+def test_resolv_link_requires_exact_no_follow_spelling(files, kind):
+    (files.root / "etc").mkdir()
+    link = files.root / "etc/resolv.conf"
+    target = {
+        "exact": H.plan.VIEW["symlink"],
+        "absolute": "/run/systemd/resolve/stub-resolv.conf",
+        "equivalent": "../run/systemd/resolve/../resolve/stub-resolv.conf",
+    }
+    if kind in target:
+        link.symlink_to(target[kind])
+    elif kind == "regular":
+        link.write_bytes(b"nameserver 127.0.0.53")
+    if kind == "exact":
+        files.verify_resolv_link(H.plan.VIEW)
+    else:
+        with pytest.raises((H.plan.Refused, OSError)):
+            files.verify_resolv_link(H.plan.VIEW)
+
+
+@pytest.mark.parametrize("phase", ["capture", "locked-reproof"])
+def test_bad_resolv_link_fails_fresh_and_locked_proof_before_mutation(files, phase):
+    host, fake = adapter(fixtures.sample(), files)
+    (files.root / "etc/resolv.conf").symlink_to("/run/systemd/resolve/stub-resolv.conf")
+    host.check_gates = lambda gates: None
+    with pytest.raises(H.plan.Refused, match="link spelling"):
+        if phase == "capture":
+            host.capture("a" * 64)
+        else:
+            host.reprove_under_lock(host.bundle, {"operation_id": "a" * 64})
+    assert fake.calls == []
+    assert host.lifecycle_attempts == set()
+    assert not host.written
+
+
+def test_resolver_inspection_binds_open_directory_to_current_path(
+    files, resolved_layout, monkeypatch
+):
+    descriptor, root, ownership, socket_inodes = resolved_layout
+    original_fdopen = H.os.fdopen
+    moved = False
+
+    def replace_directory_during_inspection(*args):
+        nonlocal moved
+        handle = original_fdopen(*args)
+        if not moved:
+            moved = True
+            root.rename(root.with_name("prior"))
+            root.mkdir()
+        return handle
+
+    monkeypatch.setattr(H.os, "fdopen", replace_directory_during_inspection)
+    with pytest.raises(H.plan.Refused, match="directory changed during inspection"):
+        files.resolver_layout(descriptor)
+
+
+def test_nonroot_resolver_layout_passes_capture_and_locked_reproof(
+    files, resolved_layout, monkeypatch
+):
+    descriptor, root, ownership, socket_inodes = resolved_layout
+    bundle = fixtures.sample()
+    observed_layout = files.resolver_layout(descriptor)
+    bundle["layout"].update(observed_layout)
+    bundle["layout"]["descriptor"] = descriptor
+    host, fake = adapter(bundle, files)
+    (files.root / "etc/resolv.conf").symlink_to(descriptor["symlink"])
+    records = {
+        path: record
+        for section in ("observed", "directories", "state_metadata")
+        for path, record in bundle[section].items()
+    }
+    records["/run/sugarkube-ethernet-dns/resolved"] = {"kind": "absent"}
+    monkeypatch.setattr(files, "metadata", lambda path, *args: records[path])
+    raw = {
+        H.apply_module.ENROLLMENT: bundle["enrollment_json"].encode(),
+        H.STATE + "/incident.json": bundle["journals"]["incident_json"].encode(),
+    }
+    monkeypatch.setattr(files, "read", lambda path: raw[path])
+    fake.config = lambda: None
+    host.check_gates = lambda gates: None
+    verified = []
+    host.remote_proof = lambda owner=None: verified.append(owner)
+    fresh = host.capture("c" * 64)
+    assert fresh["layout"]["descriptor"]["uid"] == 12345
+    host.reprove_under_lock(bundle, {"operation_id": "a" * 64})
+    assert len(verified) == 2
+    assert not host.lifecycle_attempts and not host.written
+
+
+@pytest.mark.parametrize("field", ["namespace", "container"])
+@pytest.mark.parametrize("value", ["a.b", "a.", ".a", "-a", "a-", "a" * 64, "", "UPPER", True])
+def test_receipt_requires_kubernetes_dns_labels(field, value):
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"][field] = value
+    with pytest.raises(H.plan.Refused, match="DNS probe selector"):
+        H.validate_receipt(record, bundle, {}, 150)
+
+
+@pytest.mark.parametrize("field", ["pod", "hostname"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a..b",
+        "a.",
+        ".a",
+        "a.-b",
+        "a.b-",
+        "a" * 64 + ".b",
+        ".".join(["a" * 63] * 4),
+        "",
+        "UPPER",
+        False,
+    ],
+)
+def test_receipt_requires_well_formed_dns_subdomains(field, value):
+    if field == "hostname" and value == "a.":
+        value = "a.."  # At most one terminal root dot is permitted.
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"][field] = value
+    with pytest.raises(H.plan.Refused, match="DNS probe selector"):
+        H.validate_receipt(record, bundle, {}, 150)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("namespace", "a"),
+        ("container", "a" * 63),
+        ("pod", "a-b.c-d"),
+        ("hostname", "service.test"),
+        ("hostname", "service.test."),
+        ("hostname", ".".join(["a" * 63] * 3 + ["b" * 60]) + "."),
+        ("pod", ".".join(["a" * 63] * 3 + ["b" * 61])),
+    ],
+)
+def test_receipt_accepts_valid_dns_label_boundaries(field, value):
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"][field] = value
+    H.validate_receipt(record, bundle, {}, 150)
+
+
+@pytest.mark.parametrize("field", ["issued_at", "expires_at"])
+@pytest.mark.parametrize("value", [True, False])
+def test_receipt_boolean_timestamps_are_not_numeric_authorization(field, value):
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record[field] = value
+    with pytest.raises(H.plan.Refused, match="expired or unbounded"):
+        H.validate_receipt(record, bundle, {}, 150)
+
+
+def test_hostname_terminal_dot_keeps_existing_total_length_limit():
+    bundle = fixtures.sample()
+    record = receipt(bundle)
+    record["pod_dns"]["hostname"] = ".".join(["a" * 63] * 3 + ["b" * 61]) + "."
+    with pytest.raises(H.plan.Refused, match="DNS probe selector"):
+        H.validate_receipt(record, bundle, {}, 150)

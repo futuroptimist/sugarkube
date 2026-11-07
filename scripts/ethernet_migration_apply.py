@@ -20,8 +20,8 @@ _SPEC = importlib.util.spec_from_file_location(
 planner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(planner)
 
-CATALOG = Path(__file__).with_name("migration") / "resolver-v1-to-guarded-directory-v1.json"
-CATALOG_SHA256 = "d7046d634e3a7f7faeb8557de8c00a42dd2de9894771bf4090d02881845510a8"
+CATALOG = Path(__file__).with_name("migration") / "resolver-v1-to-guarded-directory-v2.json"
+CATALOG_SHA256 = "c3b9f453be2ef4f75dc1f7e03a52726a272b4d3f5cec668fd49a0b619c6543e4"
 
 
 def guarded_plan(bundle):

@@ -9,7 +9,11 @@ against a real server.
 The [historical read-only planner](ethernet-migration-planner.md) and its catalog
 remain unchanged. `ethernet_migration_apply.guarded_plan(bundle)` evaluates the same
 source admission rules against a separate immutable guarded target catalog,
-`resolver-v1-to-guarded-directory-v1.json`. A plan still says
+`resolver-v1-to-guarded-directory-v2.json`. The earlier guarded v1 catalog remains
+unchanged for provenance; v2 pins the controller correction for canonical
+completed-enrollment comparison. An earlier plan or approval receipt is not
+automatically upgraded: regenerate and review the exact v2 plan and receipt.
+A plan still says
 `authorized_to_execute: false`. A plan is not operational authorization.
 
 ## Source interface and deployment boundary
@@ -34,7 +38,8 @@ recognize migration intent and cannot safely fence migration activation.
 ## Private operational receipt
 
 The receipt must be root-owned with mode `0600`. JSON and runtime reads are bounded
-to 128 MiB each. Backup verification instead streams in 1 MiB chunks, with a 1 TiB
+to 128 MiB each, including a bounded read and refusal if the file grows beyond
+that limit after its initial size check. Backup verification instead streams in 1 MiB chunks, with a 1 TiB
 size ceiling and a 120-second per-file deadline. It verifies the trusted open file
 and pathname still have the same device, inode, size and timestamps after hashing;
 truncation, growth or replacement refuses. The shorter admission freshness window
@@ -62,7 +67,13 @@ absent etcd key. These remain explicit operator attestations. Independently, the
 adapter rechecks observable local metadata and identity, authenticated original
 etcd endpoint status and linearizable health, exact membership, Node identity,
 readiness and addresses, enrollment markers and lock state. It never presents
-remote attestations as newly authenticated remote filesystem evidence.
+remote attestations as newly authenticated remote filesystem evidence. The
+resolver layout has a narrowly scoped read exception: its fixed directory and
+four entries must match the approved descriptor's ownership and safe file types.
+Root-owned ancestors, operational inputs and replacement targets retain their
+normal trust requirements. Fresh capture and locked reproof also verify the exact
+relative `/etc/resolv.conf` symlink spelling; an equivalent absolute target is not
+accepted.
 
 The receipt is not a cryptographic identity mechanism: trusted ownership and
 separate operational approval are required. The enrollment's old
@@ -151,8 +162,11 @@ process views, existing-pod DNS and workload HTTPS. It releases only its exact
 owner with compare-and-set, records completion and then resumes the local timer.
 Final checks run again. Remote timers are not resumed by this one-server operation.
 
-The completion record allows ordinary recovery again only for the exact migrated
-enrollment. Future DHCP changes and recovery journals are intentionally allowed
+The completion record allows ordinary recovery again only for the migrated
+enrollment content. Its comparison uses strict canonical JSON, so an ordinary
+`arm` rewrite may change whitespace or object-key ordering without blocking
+recovery. Changed values or types, duplicate keys and nonfinite numbers still
+refuse. Active migration start permits continue to bind exact enrollment bytes. Future DHCP changes and recovery journals are intentionally allowed
 through normal recovery checks after completion; the original baseline address
 is not a permanent post-migration requirement.
 

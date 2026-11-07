@@ -309,3 +309,29 @@ def test_expiry_during_lock_reproof_latches_without_stopping(case):
     assert "cluster-lock" in case[4].calls
     assert "stop" not in case[4].calls
     assert (case[5].directory / "migration-intent.json").exists()
+
+
+def test_previous_guarded_catalog_is_preserved_not_rewritten():
+    previous_path = A.CATALOG.with_name("resolver-v1-to-guarded-directory-v1.json")
+    raw = previous_path.read_bytes()
+    assert P.sha(raw) == "d7046d634e3a7f7faeb8557de8c00a42dd2de9894771bf4090d02881845510a8"
+    previous = P.parse(raw)
+    current = P.parse(A.CATALOG.read_bytes())
+    assert previous["revisions"]["target"] == "09653988b32cfc4f866aa98fff90a8f0e12f6abd"
+    assert current["revisions"]["target"] == "ebf4748d5d84e61bfbc61493df7f95278cfc68e2"
+    assert previous["artifacts"]["source"] == current["artifacts"]["source"]
+    assert (
+        previous["artifacts"]["target"]["templates"] == current["artifacts"]["target"]["templates"]
+    )
+    before = dict(previous["artifacts"]["target"]["runtime_sha256"])
+    after = dict(current["artifacts"]["target"]["runtime_sha256"])
+    assert before.pop(A.CONTROLLER) != after.pop(A.CONTROLLER)
+    assert before == after
+
+
+@pytest.mark.parametrize("expiry", [True, False])
+def test_boolean_approval_expiry_is_not_a_timestamp(case, expiry):
+    case[2]["expires_at"] = expiry
+    with pytest.raises(P.Refused, match="expired or unbounded approval"):
+        run(case)
+    assert not case[4].calls

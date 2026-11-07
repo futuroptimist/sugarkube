@@ -62,6 +62,7 @@ LIFECYCLE_TIMEOUTS = {
     ("daemon-reload",): 30,
     ("start", TIMER): 30,
 }
+MAX_INPUT_BYTES = 128 * 1024 * 1024
 LIFECYCLE_BUDGET = 600
 COMPLETION_BUDGET = 120
 COMPLETION_ATTEMPTS = 61
@@ -74,8 +75,8 @@ class ReadinessPending(plan.Refused):
 class Files:
     """Root-relative, no-symlink parent traversal and compare-before-replace writes."""
 
-    def __init__(self, root="/", uid=0):
-        self.root, self.uid = Path(root), uid
+    def __init__(self, root="/", uid=0, gid=0):
+        self.root, self.uid, self.gid = Path(root), uid, gid
 
     @contextmanager
     def parent(self, path):
@@ -105,8 +106,10 @@ class Files:
                     stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
                     "single-link regular file required",
                 )
-                plan.require(info.st_size <= 128 * 1024 * 1024, "input file too large")
-                return handle.read()
+                plan.require(info.st_size <= MAX_INPUT_BYTES, "input file too large")
+                data = handle.read(MAX_INPUT_BYTES + 1)
+                plan.require(len(data) <= MAX_INPUT_BYTES, "input grew beyond read limit")
+                return data
 
     def digest(self, path, *, clock=time.monotonic, max_bytes=1 << 40, max_seconds=120):
         """Stream large backup evidence without treating it as a small JSON input."""
@@ -158,6 +161,116 @@ class Files:
                     "backup verification time budget exceeded",
                 )
                 return digest.hexdigest()
+
+    def verify_resolv_link(self, descriptor):
+        """Require exact admitted link spelling, never follow the link target."""
+        with self.parent("/etc/resolv.conf") as (parent, name):
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            plan.require(
+                stat.S_ISLNK(info.st_mode) and info.st_uid == self.uid and info.st_gid == self.gid,
+                "untrusted resolv.conf link",
+            )
+            plan.require(
+                os.readlink(name, dir_fd=parent) == descriptor["symlink"],
+                "resolv.conf link spelling changed",
+            )
+
+    def resolver_layout(self, descriptor):
+        """Inspect only the descriptor-owned resolved directory; keep ancestors root-owned."""
+        plan.shape(descriptor, {"kind", "symlink", "uid", "gid"}, "invalid resolver descriptor")
+        plan.require(
+            all(descriptor[key] == value for key, value in plan.VIEW.items())
+            and all(
+                type(descriptor[key]) is int and 0 <= descriptor[key] < 2**32
+                for key in ("uid", "gid")
+            ),
+            "invalid resolver descriptor",
+        )
+
+        def record(info, kind, digest=None):
+            plan.require(
+                info.st_uid == descriptor["uid"]
+                and info.st_gid == descriptor["gid"]
+                and stat.S_IMODE(info.st_mode) <= 0o777
+                and (kind == "socket" or not info.st_mode & 0o022),
+                "untrusted resolver entry",
+            )
+            return {
+                "kind": kind,
+                "uid": info.st_uid,
+                "gid": info.st_gid,
+                "mode": stat.S_IMODE(info.st_mode),
+                "sha256": digest,
+                "digest_kind": "raw-sha256" if digest is not None else "none",
+            }
+
+        def stable(info):
+            return (
+                info.st_dev,
+                info.st_ino,
+                info.st_uid,
+                info.st_gid,
+                info.st_mode,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+                info.st_nlink,
+            )
+
+        with self.parent("/run/systemd/resolve") as (parent, name):
+            directory = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                directory_info = os.fstat(directory)
+                result = {"directory": record(directory_info, "directory"), "entries": {}}
+                entries = {
+                    "resolv.conf",
+                    "stub-resolv.conf",
+                    "io.systemd.Resolve",
+                    "io.systemd.Resolve.Monitor",
+                }
+                plan.require(
+                    set(os.listdir(directory)) == entries, "unexpected resolver directory entry"
+                )
+                for entry in sorted(entries):
+                    info = os.stat(entry, dir_fd=directory, follow_symlinks=False)
+                    if entry.startswith("io."):
+                        plan.require(stat.S_ISSOCK(info.st_mode), "resolver socket type changed")
+                        result["entries"][entry] = record(info, "socket")
+                    else:
+                        plan.require(
+                            stat.S_ISREG(info.st_mode)
+                            and info.st_nlink == 1
+                            and info.st_size <= MAX_INPUT_BYTES,
+                            "untrusted resolver file",
+                        )
+                        record(info, "file")
+                        fd = os.open(
+                            entry, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                        )
+                        with os.fdopen(fd, "rb") as handle:
+                            plan.require(
+                                stable(os.fstat(handle.fileno())) == stable(info),
+                                "resolver file changed during open",
+                            )
+                            data = handle.read(MAX_INPUT_BYTES + 1)
+                            plan.require(
+                                len(data) <= MAX_INPUT_BYTES
+                                and stable(os.fstat(handle.fileno())) == stable(info)
+                                and stable(os.stat(entry, dir_fd=directory, follow_symlinks=False))
+                                == stable(info),
+                                "resolver file changed during read",
+                            )
+                            result["entries"][entry] = record(info, "file", plan.sha(data))
+                plan.require(
+                    set(os.listdir(directory)) == entries
+                    and stable(os.fstat(directory)) == stable(directory_info)
+                    and stable(os.stat(name, dir_fd=parent, follow_symlinks=False))
+                    == stable(directory_info),
+                    "resolver directory changed during inspection",
+                )
+                return result
+            finally:
+                os.close(directory)
 
     def metadata(self, path, digest_kind="raw-sha256"):
         with self.parent(path) as (parent, name):
@@ -320,8 +433,22 @@ def validate_receipt(receipt, bundle, approved_plan, now):
     import re
 
     for key in ("namespace", "pod", "container", "hostname"):
+        value = probe[key]
+        subdomain = key in {"pod", "hostname"}
+        # A DNS query may be absolute; Kubernetes object names may not.
+        labels = (
+            value[:-1]
+            if key == "hostname" and type(value) is str and value.endswith(".")
+            else value
+        )
         plan.require(
-            type(probe[key]) is str and re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}", probe[key]),
+            type(value) is str
+            and 1 <= len(value) <= (253 if subdomain else 63)
+            and (subdomain or "." not in value)
+            and all(
+                re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in labels.split(".")
+            ),
             "invalid DNS probe selector",
         )
     plan.require(type(probe["uid"]) is str and bool(probe["uid"]), "missing probe pod identity")
@@ -472,6 +599,7 @@ class HostBackend:
         self.inactive(WATCHER)
 
     def local_capture(self, fresh):
+        self.files.verify_resolv_link(fresh["layout"]["descriptor"])
         for section in ("observed", "directories", "state_metadata"):
             for path, expected in fresh[section].items():
                 actual = self.files.metadata(path, expected["digest_kind"])
@@ -486,15 +614,11 @@ class HostBackend:
             "journal drift",
         )
         layout = fresh["layout"]
+        actual_layout = self.files.resolver_layout(layout["descriptor"])
         plan.require(
-            self.files.metadata("/run/systemd/resolve") == layout["directory"],
-            "resolver directory changed",
+            actual_layout == {key: layout[key] for key in ("directory", "entries")},
+            "resolver layout changed",
         )
-        for name, expected in layout["entries"].items():
-            plan.require(
-                self.files.metadata("/run/systemd/resolve/" + name) == expected,
-                "resolver entry changed",
-            )
         plan.require(
             self.files.metadata("/run/sugarkube-ethernet-dns/resolved")["kind"] == "absent",
             "partial directory-view migration",
