@@ -299,7 +299,9 @@ def test_known_rendered_bytes(label, evidence):
             name = Path(path).name.replace(
                 "ethernet-quorum-recover.py", "ethernet_quorum_recover.py"
             )
-            assert M.sha((ROOT / "scripts" / name).read_bytes()) == digest
+            historical = FIXTURES / ("target-" + Path(path).name)
+            source = historical if historical.exists() else ROOT / "scripts" / name
+            assert M.sha(source.read_bytes()) == digest
 
 
 @pytest.mark.parametrize(
