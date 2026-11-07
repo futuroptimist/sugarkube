@@ -1,0 +1,736 @@
+"""Offline runtime/state-machine coverage, never a live K3s qualification."""
+
+import copy
+import importlib.util
+import json
+import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "staged", ROOT / "scripts/ethernet_staged_recovery.py"
+)
+S = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(S)
+Q = S.Q
+SPEC = importlib.util.spec_from_file_location(
+    "dual_fixture", ROOT / "tests/test_ethernet_dual_recovery.py"
+)
+D = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(D)
+D.M = Q
+
+
+class Backend(D.Backend):
+    def __init__(self, e, c):
+        super().__init__(e, c)
+        self.mid = e["local_member_id"]
+        self.boot = False
+        self.events = []
+        self.fail_stop = False
+
+    def quiet(self):
+        Q.require(not self.boot, "bootstrap still running")
+
+    def start(self, fd):
+        self.events.append("start")
+        self.boot = True
+        with self.c.mutex:
+            self.c.active.add(self.mid)
+        return 100 + int(self.mid)
+
+    def alive(self):
+        Q.require(self.boot, "bootstrap exited")
+
+    def stop(self):
+        self.events.append("stop")
+        Q.require(not self.fail_stop, "bootstrap did not stop")
+        with self.c.mutex:
+            self.c.active.remove(self.mid)
+        self.boot = False
+
+    def retry_reads(self):
+        pass
+
+    def etcd(self, host, *args, input_text=None):
+        with self.c.mutex:
+            Q.require(host[2] in self.c.active, "endpoint not yet available")
+            self.c.quorum = len(self.c.active) >= 2
+            return super().etcd(host, *args, input_text=input_text)
+
+    def address_node(self, host, name, patch=None, status=False):
+        with self.c.mutex:
+            Q.require(host[2] in self.c.active, "API unavailable")
+            # API cannot become ready until this member's numeric URL is repaired.
+            Q.require(
+                self.c.members[host[2]]["peerURLs"][0] == f"https://{self.c.ips[host[2]]}:2380",
+                "numeric URL gate",
+            )
+            node = self.c.nodes[name]
+            if patch is not None:
+                self.c.patches.append((self.mid, copy.deepcopy(patch)))
+                for operation in patch[:-1]:
+                    value = node
+                    for key in operation["path"].strip("/").split("/"):
+                        value = value[key.replace("~1", "/")]
+                    Q.require(value == operation["value"], "patch conflict")
+                if status:
+                    node["status"]["addresses"] = copy.deepcopy(patch[-1]["value"])
+                else:
+                    node["metadata"]["annotations"]["k3s.io/internal-ip"] = patch[-1]["value"]
+                node["metadata"]["resourceVersion"] = str(
+                    int(node["metadata"]["resourceVersion"]) + 1
+                )
+            return copy.deepcopy(node)
+
+    def normal_running(self):
+        assert not self.boot and self.mid in self.c.active
+        return {"MainPID": "200", "InvocationID": "normal"}
+
+    def normal(self):
+        with self.c.mutex:
+            self.c.active.add(self.mid)
+            self.c.nodes[f"pi{self.mid}"]["status"]["conditions"] = [
+                {
+                    "type": "Ready",
+                    "status": "True",
+                    "lastHeartbeatTime": datetime.now(timezone.utc).isoformat(),
+                }
+            ]
+
+
+@pytest.fixture
+def cluster(tmp_path, monkeypatch):
+    c, old = D.recovery.__wrapped__(tmp_path)
+    c.active, c.nodes, c.patches, c.mutex = set(), {}, [], threading.RLock()
+    c.api = True
+    result = []
+    # Avoid real backoff in offline tests without changing Python's shared clock.
+    monkeypatch.setattr(
+        Q, "time", SimpleNamespace(sleep=lambda _: None, time=time.time, monotonic=time.monotonic)
+    )
+    for voter in old:
+        b = Backend(voter.e, c)
+        r = S.Recovery(voter.e, b, voter.path)
+        mid = b.mid
+        c.nodes[f"pi{mid}"] = {
+            "metadata": {
+                "name": f"pi{mid}",
+                "uid": f"uid{mid}",
+                "resourceVersion": "1",
+                "annotations": {
+                    "etcd.k3s.cattle.io/node-name": f"member{mid}",
+                    "k3s.io/internal-ip": f"10.0.0.{mid}",
+                },
+            },
+            "status": {
+                "addresses": [
+                    {"type": "InternalIP", "address": f"10.0.0.{mid}"},
+                    {"type": "Hostname", "address": f"pi{mid}"},
+                ],
+                "conditions": [{"type": "Ready", "status": "False"}],
+                "capacity": {"cpu": "4"},
+            },
+        }
+        for member in r.e["members"]:
+            c.markers[Q.KEY + "/enrollment/" + member["id"]] = r.marker(member)
+        result.append(
+            S.Coordinator(r, voter.path.parent / "staged.json", sleep=lambda _: time.sleep(0.001))
+        )
+    return c, result
+
+
+@pytest.mark.parametrize("version", sorted(Q.VERSIONS))
+def test_three_original_cold_starts_repair_before_serial_normal_handover(cluster, version):
+    c, controllers = cluster
+    for controller in controllers:
+        controller.r.e["k3s_version"] = version
+        for member in controller.r.e["members"]:
+            c.markers[Q.KEY + "/enrollment/" + member["id"]] = controller.r.marker(member)
+
+    def run(controller):
+        assert controller.pre_start(99) == "normal-start-authorized"
+        # No bootstrap child survives ExecStartPre.
+        assert controller.b.events == ["start", "stop"] and not controller.b.boot
+        assert c.owner == controller.record["token"]
+        controller.b.normal()
+        controller.post_start()
+        return controller.record["phase"]
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        assert list(pool.map(run, controllers)) == ["normal"] * 3
+    assert c.owner is None and sorted(c.updates) == ["1", "2", "3"]
+    assert len(c.patches) == 6
+    for controller in controllers:
+        mid = controller.b.mid
+        node = c.nodes[f"pi{mid}"]
+        assert node["metadata"]["uid"] == f"uid{mid}"
+        assert node["status"]["capacity"] == {"cpu": "4"}
+        assert node["status"]["addresses"][0]["address"] == c.ips[mid]
+        assert c.members[mid]["peerURLs"] == Q.dual_urls(controller.r.local, c.ips[mid])
+
+
+def test_unknown_handover_acquire_never_replayed(cluster):
+    c, (controller, *_) = cluster
+    c.active.update(("1", "2", "3"))
+    controller.record = dict(
+        member_id="1",
+        cluster_id="100",
+        ip="10.0.0.11",
+        old_ip="10.0.0.1",
+        **{"token": "owner"},
+        phase="addresses-verified",
+    )
+    c.failure = "acquire"
+    with pytest.raises(Q.Stop, match="unknown acquisition"):
+        controller.handover()
+    assert controller.record["phase"] == "handover-acquire-intent"
+    writes = len(c.calls)
+    with pytest.raises(Q.Stop, match="unfinished staged"):
+        controller.pre_start(99)
+    assert len(c.calls) == writes and c.owner == "owner"
+
+
+def test_definitive_handover_contention_is_readable_wait(cluster):
+    c, (controller, *_) = cluster
+    c.active.update(("1", "2", "3"))
+    c.owner = "other"
+    controller.record = dict(**{"token": "owner"}, phase="addresses-verified")
+    assert controller.handover() is False
+    assert controller.record["phase"] == "waiting-for-handover" and c.owner == "other"
+
+
+def test_membership_contention_waits_without_api_or_update(cluster):
+    c, (controller, *_) = cluster
+    c.active.update(("1", "2", "3"))
+    c.owner = "other"
+    Q.atomic_json(
+        controller.r.path,
+        dict(
+            member_id="1",
+            cluster_id="100",
+            ip="10.0.0.11",
+            **{"token": "mine"},
+            phase="transport-pending",
+            old_peer_urls=Q.dual_urls(controller.r.local, "10.0.0.1"),
+            mutation_dispatched=False,
+        ),
+    )
+    assert controller.membership() is False
+    assert controller.r.previous()["phase"] == "waiting-for-lock"
+    assert c.updates == [] and c.patches == []
+
+
+def test_read_transport_refresh_never_clears_unknown_write():
+    b = S.Backend({}, {})
+    b.connections = {"peer": None}
+    b.retry_reads()
+    assert b.connections == {}
+    b.write_failed = True
+    with pytest.raises(Q.Stop, match="uncertain mutation"):
+        b.retry_reads()
+
+
+def test_runtime_start_uses_verified_service_environment(monkeypatch):
+    b = S.Backend({}, {})
+    monkeypatch.setenv("K3S_CLUSTER_RESET", "true")
+    monkeypatch.setenv("NOTIFY_SOCKET", "/wrong")
+    monkeypatch.setattr(b, "service_context", lambda: None)
+    states = iter((False, True))
+    monkeypatch.setattr(b, "process_executable", lambda *args, **kwargs: next(states))
+    monkeypatch.setattr(S.time, "sleep", lambda _: None)
+    monkeypatch.setattr(b, "quiet", lambda: None)
+    monkeypatch.setattr(b, "config", lambda: None)
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda argv: (
+            "ExecStart={ argv[]=/usr/local/bin/k3s server --server https://pi2.local:6443"
+            " ; ignore_errors=no ; }"
+            if argv[-1] == "--property=ExecStart"
+            else "Environment=K3S_NODE_NAME=verified\nEnvironmentFiles="
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        S.subprocess,
+        "Popen",
+        lambda argv, **kw: calls.append((argv, kw)) or SimpleNamespace(pid=9, poll=lambda: None),
+    )
+    assert b.start(7) == 9
+    argv, kwargs = calls[0]
+    assert argv[-1] == "--disable-agent=true"
+    assert kwargs["pass_fds"] == (7,)
+    assert kwargs["env"]["K3S_NODE_NAME"] == "verified"
+    assert "K3S_CLUSTER_RESET" not in kwargs["env"] and "NOTIFY_SOCKET" not in kwargs["env"]
+
+
+def test_stop_timeout_never_kills_or_authorizes_normal_start(monkeypatch):
+    b = S.Backend({}, {})
+    calls = []
+
+    def wait(timeout):
+        raise subprocess.TimeoutExpired("k3s", timeout)
+
+    b.child = SimpleNamespace(
+        poll=lambda: None, send_signal=lambda sig: calls.append(sig), wait=wait
+    )
+    with pytest.raises(Q.Stop, match="did not stop"):
+        b.stop()
+    assert calls == [S.signal.SIGTERM]
+
+
+def test_hook_is_importable_with_isolated_python_and_no_ignored_poststart():
+    result = subprocess.run(
+        [
+            __import__("sys").executable,
+            "-I",
+            str(ROOT / "scripts/ethernet_staged_recovery.py"),
+            "hook",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == S.hook().decode()
+    assert "ExecStartPost=-" not in result.stdout and "SendSIGKILL=no" in result.stdout
+
+
+def completed(controller):
+    """Seed only a fully verified prior incident, without live peers."""
+    controller.record = dict(
+        member_id="1",
+        cluster_id="100",
+        ip="10.0.0.11",
+        old_ip="10.0.0.1",
+        **{"token": "a" * 32},
+        phase="normal",
+    )
+    Q.atomic_json(controller.path, controller.record)
+    Q.atomic_json(
+        controller.r.path, dict(member_id="1", cluster_id="100", ip="10.0.0.11", phase="complete")
+    )
+    Q.atomic_json(
+        controller.r.address_journal,
+        dict(
+            member_id="1",
+            cluster_id="100",
+            node_uid="uid1",
+            ip="10.0.0.11",
+            old_ip="10.0.0.1",
+            phase="verified",
+        ),
+    )
+
+
+def test_completed_incident_allows_unchanged_cold_start_without_survivors(cluster):
+    c, (controller, *_) = cluster
+    completed(controller)
+    assert not c.active
+    assert controller.pre_start(99) == "unchanged"
+    assert c.calls == [] and controller.b.events == []
+
+
+def test_second_incident_preserves_previous_evidence_before_start(cluster, monkeypatch):
+    c, (controller, *_) = cluster
+    completed(controller)
+    before = dict(
+        staged=copy.deepcopy(controller.record),
+        membership=json.loads(controller.r.path.read_text()),
+        address=json.loads(controller.r.address_journal.read_text()),
+    )
+    c.ips["1"] = "10.0.0.21"
+
+    def start(fd):
+        archived = controller.path.parent / ("staged-archive-" + "a" * 32 + ".json")
+        assert json.loads(archived.read_text()) == before
+        raise Q.Stop("synthetic start failure")
+
+    monkeypatch.setattr(controller.b, "start", start)
+    with pytest.raises(Q.Stop, match="synthetic start failure"):
+        controller.pre_start(99)
+    assert controller.record["old_ip"] == "10.0.0.11"
+    assert controller.record["phase"] == "bootstrap-start-intent"
+    assert json.loads(controller.r.address_journal.read_text()) == before["address"]
+
+
+def test_incomplete_incident_never_allows_second_change(cluster):
+    c, (controller, *_) = cluster
+    completed(controller)
+    previous = json.loads(controller.r.path.read_text())
+    previous["phase"] = "completion-pending"
+    Q.atomic_json(controller.r.path, previous)
+    c.ips["1"] = "10.0.0.21"
+    with pytest.raises(Q.Stop, match="unfinished staged"):
+        controller.pre_start(99)
+    assert controller.b.events == []
+
+
+def test_completion_service_uses_new_runtime_and_does_not_restart():
+    service = S.completion_service().decode()
+    assert str(S.RUNTIME) + " check-completion" in service
+    assert " restart" not in service and str(Q.RUNTIME) not in service
+
+
+@pytest.mark.parametrize(
+    "route,write",
+    [("/v3/maintenance/status", False), ("/v3/kv/txn", True), ("/v3/cluster/member/update", True)],
+)
+def test_adapter_failure_classification(monkeypatch, route, write):
+    b = S.Backend({}, {})
+
+    def fail(*args):
+        raise Q.Stop("transport failure")
+
+    monkeypatch.setattr(Q.Backend, "request", fail)
+    with pytest.raises(Q.Stop):
+        b.request("peer", route, {})
+    assert b.write_failed is write
+
+
+@pytest.mark.parametrize("patch", [None, [{"op": "test"}]])
+def test_adapter_api_failure_classification(monkeypatch, patch):
+    b = S.Backend({}, {})
+
+    def fail(*args):
+        raise Q.Stop("API failure")
+
+    monkeypatch.setattr(Q.Backend, "address_node", fail)
+    with pytest.raises(Q.Stop):
+        b.address_node("peer", "node", patch)
+    assert b.write_failed is (patch is not None)
+
+
+def proc_tree(tmp_path, monkeypatch):
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    original = Path
+    monkeypatch.setattr(
+        S,
+        "Path",
+        lambda value: (
+            tmp_path / str(value).lstrip("/") if str(value).startswith("/proc") else original(value)
+        ),
+    )
+    return proc
+
+
+@pytest.mark.parametrize("kind", ["quiet", "comm", "exe", "cmdline", "cgroup", "vanished"])
+def test_quiescence_adapter_reads_process_evidence(tmp_path, monkeypatch, kind):
+    monkeypatch.setattr(S.os, "getpid", lambda: 999999)
+    proc = proc_tree(tmp_path, monkeypatch)
+    entry = proc / "10"
+    entry.mkdir()
+    (proc / "non-numeric").mkdir()
+    if kind != "vanished":
+        (entry / "comm").write_text("containerd-shim" if kind == "comm" else "benign")
+        (entry / "cmdline").write_bytes(b"/usr/bin/kubelet\0" if kind == "cmdline" else b"benign\0")
+        (entry / "cgroup").write_text("0::/kubepods.slice" if kind == "cgroup" else "0::/other")
+        (entry / "exe").symlink_to("/usr/bin/etcd" if kind == "exe" else "/usr/bin/benign")
+    b = S.Backend({}, {})
+    monkeypatch.setattr(b, "command", lambda _: "MainPID=0")
+    if kind in ("quiet", "vanished"):
+        b.quiet()
+    else:
+        with pytest.raises(Q.Stop, match="residual"):
+            b.quiet()
+
+
+def test_service_context_and_normal_process_identity(tmp_path, monkeypatch):
+    proc = proc_tree(tmp_path, monkeypatch)
+    (proc / "self").mkdir()
+    (proc / "self/cgroup").write_text("0::/system.slice/k3s.service\n")
+    (proc / "10").mkdir()
+    executable = "/var/lib/rancher/k3s/data/" + "a" * 64 + "/bin/k3s"
+    (proc / "10/exe").symlink_to(executable)
+    (proc / "10/cmdline").write_bytes(b"k3s\0server\0")
+    monkeypatch.setenv("INVOCATION_ID", "a" * 32)
+    b = S.Backend({}, {"server_executable": executable})
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda _: f"ControlPID={S.os.getpid()}\n"
+        "ControlGroup=/system.slice/k3s.service\nInvocationID=" + "a" * 32,
+    )
+    b.service_context()
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda _: "ActiveState=activating\nSubState=start-post\n"
+        "MainPID=10\nInvocationID=" + "a" * 32 + "\nNRestarts=0",
+    )
+    assert b.normal_running()["MainPID"] == "10"
+    (proc / "10/cmdline").write_bytes(b"k3s\0server\0--disable-agent=true")
+    with pytest.raises(Q.Stop, match="agentless"):
+        b.normal_running()
+
+
+def test_child_resolver_mount_is_checked(tmp_path, monkeypatch):
+    b = S.Backend({"resolver_view": {}}, {})
+    b.child = SimpleNamespace(pid=42, poll=lambda: None)
+    (tmp_path / "upstream-resolv.conf").write_text("original")
+    calls = []
+    dns = SimpleNamespace(
+        STATE=tmp_path,
+        resolver_text=lambda text: (text, "expected"),
+        check_process_view=lambda *args: calls.append(args),
+    )
+    monkeypatch.setattr(b, "process_executable", lambda pid: True)
+    monkeypatch.setattr(Q.Backend, "config", lambda _: None)
+    monkeypatch.setattr(Q, "sibling", lambda _: dns)
+    monkeypatch.setattr(b, "command", lambda _: "MainPID=17")
+    b.config()
+    assert calls == [(b.e, "42", "17", "expected")]
+
+
+def test_staged_loaded_hook_and_pins(tmp_path, monkeypatch):
+    path = tmp_path / "hook"
+    path.write_bytes(S.hook())
+    runtime = tmp_path / "runtime"
+    runtime.write_bytes(b"original")
+    monkeypatch.setattr(Q, "HOOK", path)
+    monkeypatch.setattr(Q, "trusted_file", lambda _: None)
+    b = S.Backend({}, {"runtime_sha256": {str(runtime): Q.digest(runtime.read_bytes())}})
+    text = (
+        "NeedDaemonReload=no\nDropInPaths=" + str(path) + "\nTimeoutStartUSec=15min\n"
+        "TimeoutStopUSec=1min 15s\nSendSIGKILL=no\n"
+        f"ExecStartPre={{ argv[]=/usr/bin/python3 -I {S.RUNTIME} pre-start"
+        " ; ignore_errors=no ; }\n"
+        f"ExecStartPost={{ argv[]=/usr/bin/python3 -I {S.RUNTIME} post-start"
+        " ; ignore_errors=no ; }"
+    )
+    monkeypatch.setattr(b, "command", lambda _: text)
+    b.recovery_hook_loaded()
+    runtime.write_bytes(b"changed")
+    with pytest.raises(Q.Stop, match="runtime identity"):
+        b.recovery_hook_loaded()
+
+
+def test_environment_files_are_parsed_without_ambient_values(tmp_path, monkeypatch):
+    envfile = tmp_path / "environment"
+    envfile.write_text('# comment\nK3S_NODE_NAME="from file"\n\n')
+    b = S.Backend({}, {})
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda _: "Environment=K3S_NODE_NAME=first\nEnvironmentFiles="
+        + str(envfile)
+        + " (ignore_errors=yes)",
+    )
+    assert b.server_environment()["K3S_NODE_NAME"] == "from file"
+
+
+def test_clean_stop_observes_child_exit_then_quiescence(monkeypatch):
+    b = S.Backend({}, {})
+    calls = []
+    b.child = SimpleNamespace(
+        poll=lambda: None,
+        returncode=0,
+        send_signal=lambda sig: calls.append(sig),
+        wait=lambda timeout: calls.append(timeout),
+    )
+    monkeypatch.setattr(b, "quiet", lambda: calls.append("quiet"))
+    b.stop()
+    assert calls == [S.signal.SIGTERM, 60, "quiet"]
+
+
+def test_explicit_opt_in_pins_all_runtime_dependencies(cluster, tmp_path, monkeypatch):
+    _, (controller, *_) = cluster
+    e = copy.deepcopy(controller.r.e)
+    e["resolver_view"] = {}
+    enrollment, opt_path = tmp_path / "enrollment", tmp_path / "opt"
+    enrollment.write_text(json.dumps(e))
+    monkeypatch.setattr(Q, "ENROLLMENT", enrollment)
+    monkeypatch.setattr(S, "OPT_IN", opt_path)
+    monkeypatch.setattr(Q, "trusted_file", lambda _: None)
+    executable = "/var/lib/rancher/k3s/data/" + "a" * 64 + "/bin/k3s"
+    paths = [
+        executable,
+        S.RUNTIME,
+        Q.RUNTIME,
+        "/usr/local/bin/k3s",
+        Q.TRANSPORT,
+        Q.DESCRIPTOR,
+        Q.WAL_RUNTIME,
+        S.RUNTIME.with_name("ethernet_mdns_resolver.py"),
+    ]
+    opt = dict(
+        schema_version=1,
+        cold_original_database_bootstrap=True,
+        server_executable=executable,
+        enrollment_sha256=Q.digest(enrollment.read_bytes()),
+        runtime_sha256={str(path): "a" * 64 for path in paths},
+    )
+    opt_path.write_text(json.dumps(opt))
+    assert S.load_opt_in() == (e, opt)
+    del opt["runtime_sha256"][str(Q.DESCRIPTOR)]
+    opt_path.write_text(json.dumps(opt))
+    with pytest.raises(Q.Stop, match="runtimes must be pinned"):
+        S.load_opt_in()
+
+
+@pytest.mark.parametrize("phase", ["hook", "completion-service"])
+def test_cli_artifact_outputs(monkeypatch, capsys, phase):
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", phase])
+    assert S.main() == 0
+    assert "Managed by ethernet_staged_recovery.py" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "phase", ["pre-start", "post-start", "check-completion", "check-completion-normal"]
+)
+def test_cli_dispatch_without_host_execution(cluster, monkeypatch, phase):
+    c, (controller, *_) = cluster
+    b, r = controller.b, controller.r
+    c.ips["1"] = r.e["local_ipv4"]
+    b.child = None
+    if phase == "check-completion-normal":
+        completed(controller)
+        c.ips["1"] = "10.0.0.11"
+        phase = "check-completion"
+    calls = []
+    monkeypatch.setattr(S.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(S, "STATE", r.path.parent)
+    monkeypatch.setattr(S, "load_opt_in", lambda: (r.e, {}))
+    monkeypatch.setattr(Q, "private_state", lambda _: None)
+    monkeypatch.setattr(S, "Backend", lambda *args: b)
+    monkeypatch.setattr(S, "Recovery", lambda *args: r)
+    monkeypatch.setattr(b, "service_context", lambda: calls.append("context"), raising=False)
+    monkeypatch.setattr(b, "close", lambda: calls.append("close"), raising=False)
+    monkeypatch.setattr(S.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", phase])
+    assert S.main() == 0
+    assert calls[-1] == "close"
+
+
+@pytest.mark.parametrize("cleanup_ok", [True, False])
+def test_cli_signal_cleanup_preserves_failure_phase(cluster, monkeypatch, cleanup_ok):
+    _, (controller, *_) = cluster
+    b, r = controller.b, controller.r
+    controller.record = dict(
+        phase="bootstrap-running", member_id="1", cluster_id="100", **{"token": "a" * 32}
+    )
+    b.child = SimpleNamespace(poll=lambda: None)
+    calls = []
+    monkeypatch.setattr(S.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(S, "STATE", r.path.parent)
+    monkeypatch.setattr(S, "load_opt_in", lambda: (r.e, {}))
+    monkeypatch.setattr(Q, "private_state", lambda _: None)
+    monkeypatch.setattr(S, "Backend", lambda *args: b)
+    monkeypatch.setattr(S, "Recovery", lambda *args: r)
+    monkeypatch.setattr(S, "Coordinator", lambda *args: controller)
+    monkeypatch.setattr(b, "service_context", lambda: None, raising=False)
+    monkeypatch.setattr(b, "close", lambda: calls.append("close"), raising=False)
+
+    def stop():
+        calls.append("stop")
+        if not cleanup_ok:
+            raise Q.Stop("stop unconfirmed")
+
+    monkeypatch.setattr(b, "stop", stop)
+    handlers = {}
+    monkeypatch.setattr(S.signal, "signal", lambda sig, handler: handlers.update({sig: handler}))
+    monkeypatch.setattr(controller, "pre_start", lambda fd: handlers[S.signal.SIGTERM](15, None))
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", "pre-start"])
+    assert S.main() == 2
+    assert controller.record["phase"] == (
+        "cleanup-stopped" if cleanup_ok else "cleanup-stop-intent"
+    )
+    assert controller.record["failed_phase"] == "bootstrap-running"
+    assert calls == ["stop", "close"]
+
+
+def test_migration_interlock_is_read_only_and_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "STATE", tmp_path)
+    calls = []
+    monkeypatch.setattr(Q, "migration_start_guard", lambda *args: calls.append(args), raising=False)
+    backend = object()
+    S.migration_guard(backend)
+    assert calls == [(Q.ENROLLMENT, backend, tmp_path, "watch")]
+    monkeypatch.delattr(Q, "migration_start_guard")
+    (tmp_path / "migration-intent.json").write_text("{}")
+    with pytest.raises(Q.Stop, match="migration state"):
+        S.migration_guard(backend)
+
+
+def test_loaded_journal_and_conflicting_archive_are_guarded(cluster):
+    c, (controller, *_) = cluster
+    completed(controller)
+    restored = S.Coordinator(controller.r, controller.path)
+    assert restored.record == controller.record
+    c.ips["1"] = "10.0.0.21"
+    archive = controller.path.parent / ("staged-archive-" + "a" * 32 + ".json")
+    archive.write_text("{}")
+    with pytest.raises(Q.Stop, match="archive conflicts"):
+        restored.pre_start(99)
+
+
+@pytest.mark.parametrize("phase", ["transport-pending", "completion-pending"])
+def test_membership_read_unavailability_is_pollable(cluster, phase):
+    _, (controller, *_) = cluster
+    Q.atomic_json(
+        controller.r.path, dict(member_id="1", cluster_id="100", phase=phase, ip="10.0.0.11")
+    )
+    assert controller.membership() is False
+    controller.record = dict(ip="10.0.0.11", old_ip="10.0.0.1")
+    assert controller.api() is False
+
+
+def test_poststart_waits_for_fresh_readiness_without_releasing_early(cluster, monkeypatch):
+    _, (controller, *_) = cluster
+    controller.record = dict(phase="normal-start-intent", **{"token": "owner"})
+    attempts, mutations = [], []
+
+    def proof():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise Q.Stop("heartbeat not fresh")
+
+    def release(token, release=False):
+        assert len(attempts) == 2 and release
+        mutations.append(token)
+        return {"succeeded": True}
+
+    def pending():
+        raise Q.Stop("other nodes still bootstrapping")
+
+    monkeypatch.setattr(controller, "normal_proof", proof)
+    monkeypatch.setattr(controller.r, "owned", lambda _: None)
+    monkeypatch.setattr(controller.r, "transaction", release)
+    monkeypatch.setattr(controller.r, "post_start", pending)
+    assert controller.post_start() == "completion-pending"
+    assert mutations == ["owner"] and controller.record["phase"] == "normal"
+
+
+def test_main_guard_is_executed_without_host_access(monkeypatch):
+    import runpy
+
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", "hook"])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(ROOT / "scripts/ethernet_staged_recovery.py"), run_name="__main__")
+    assert exc.value.code == 0
+
+
+def test_dangling_migration_intent_cannot_bypass_fence(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "STATE", tmp_path)
+    monkeypatch.delattr(Q, "migration_start_guard", raising=False)
+    (tmp_path / "migration-intent.json").symlink_to(tmp_path / "missing")
+    with pytest.raises(Q.Stop, match="migration state"):
+        S.migration_guard(object())
+
+
+def test_extracted_process_pin_distinguishes_initial_wrapper(tmp_path, monkeypatch):
+    proc = proc_tree(tmp_path, monkeypatch)
+    (proc / "10").mkdir()
+    (proc / "10/exe").symlink_to("/usr/local/bin/k3s")
+    b = S.Backend({}, {"server_executable": "/var/lib/rancher/k3s/data/" + "a" * 64 + "/bin/k3s"})
+    assert b.process_executable(10, allow_wrapper=True) is False
+    with pytest.raises(Q.Stop, match="internal executable"):
+        b.process_executable(10)

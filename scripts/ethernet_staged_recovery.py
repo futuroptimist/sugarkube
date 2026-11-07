@@ -1,0 +1,685 @@
+#!/usr/bin/env python3
+"""Explicit cold-host, original-database bootstrap before normal K3s startup.
+
+This is a separately opted-in runtime. It does not install/enable units, stop
+workloads, edit databases, bypass admission, or retry uncertain mutations.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import importlib.util
+import json
+import os
+import re
+import shlex
+import signal
+import subprocess
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+source = Path(__file__).with_name("ethernet-quorum-recover.py")
+if not source.exists():
+    source = Path(__file__).with_name("ethernet_quorum_recover.py")
+spec = importlib.util.spec_from_file_location("staged_quorum", source)
+Q = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(Q)
+
+RUNTIME = Path("/usr/local/libexec/sugarkube/ethernet_staged_recovery.py")
+OPT_IN = Path("/etc/rancher/k3s/sugarkube-staged-recovery.json")
+STATE = Path("/var/lib/sugarkube/ethernet-recovery")
+
+
+def migration_guard(backend):
+    guard = getattr(Q, "migration_start_guard", None)
+    if guard is not None:
+        # 'watch' is explicitly read-only: never consume a migration start permit.
+        guard(Q.ENROLLMENT, backend, STATE, "watch")
+    else:
+        Q.require(
+            not any(
+                ((STATE / name).exists() or (STATE / name).is_symlink())
+                for name in ("migration-intent.json", "migration-complete.json")
+            ),
+            "migration state requires a controller with the read-only migration guard",
+        )
+
+
+def hook():
+    call = f"/usr/bin/python3 -I {RUNTIME}"
+    return (
+        "# Managed by ethernet_staged_recovery.py\n[Service]\n"
+        "TimeoutStartSec=900\nTimeoutStopSec=75\nSendSIGKILL=no\n"
+        f"ExecStartPre={call} pre-start\n"
+        f"ExecStartPost={call} post-start\n"
+    ).encode()
+
+
+def completion_service():
+    return (
+        "# Managed by ethernet_staged_recovery.py\n[Unit]\n"
+        "Description=Verify staged Ethernet recovery completion\nAfter=network-online.target\n"
+        "[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=185\n"
+        f"ExecStart=/usr/bin/timeout 180s /usr/bin/python3 -I {RUNTIME} check-completion\n"
+    ).encode()
+
+
+class Backend(Q.Backend):
+    def __init__(self, enrollment, opt_in):
+        super().__init__(enrollment)
+        self.opt_in = opt_in
+        self.child = None
+        self.write_failed = False
+
+    def request(self, host, route, payload):
+        try:
+            return super().request(host, route, payload)
+        except Q.Stop:
+            if route in ("/v3/kv/txn", "/v3/cluster/member/update"):
+                self.write_failed = True
+            raise
+
+    def address_node(self, host, node_name, patch=None, status=False):
+        try:
+            return super().address_node(host, node_name, patch, status)
+        except Q.Stop:
+            if patch is not None:
+                self.write_failed = True
+            raise
+
+    def retry_reads(self):
+        Q.require(not self.write_failed, "uncertain mutation forbids transport retry")
+        # Called only after an explicitly read-only proof failed. Keep pinned
+        # locator addresses; a different address is a new incident, not a retry.
+        self.close()
+        self.connections = {}
+
+    def recovery_hook_loaded(self):
+        Q.trusted_file(Q.HOOK)
+        Q.require(Q.HOOK.read_bytes() == hook(), "staged hook differs")
+        unit = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "k3s.service",
+                "--property=NeedDaemonReload,DropInPaths,ExecStartPre,ExecStartPost,"
+                "TimeoutStartUSec,TimeoutStopUSec,SendSIGKILL",
+            ]
+        )
+        properties = dict(line.split("=", 1) for line in unit.splitlines() if "=" in line)
+        Q.require(
+            properties.get("NeedDaemonReload") == "no"
+            and str(Q.HOOK) in properties.get("DropInPaths", "").split()
+            and properties.get("TimeoutStartUSec") == "15min"
+            and properties.get("TimeoutStopUSec") == "1min 15s"
+            and properties.get("SendSIGKILL") == "no",
+            "staged hook not loaded",
+        )
+        for phase, key in [("pre-start", "ExecStartPre"), ("post-start", "ExecStartPost")]:
+            expected = f"/usr/bin/python3 -I {RUNTIME} {phase}"
+            commands = re.findall(
+                r"argv\[\]=(.*?) ; ignore_errors=(yes|no) ;", properties.get(key, "")
+            )
+            Q.require(commands.count((expected, "no")) == 1, "staged command differs")
+            Q.require(
+                not any(str(Q.RUNTIME) in command for command, _ in commands),
+                "old recovery hook still loaded",
+            )
+        for name, expected in self.opt_in["runtime_sha256"].items():
+            path = Path(name)
+            Q.trusted_file(path)
+            Q.require(Q.digest(path.read_bytes()) == expected, "staged runtime identity changed")
+
+    def config(self):
+        migration_guard(self)
+        super().config()
+        if self.child is not None and self.child.poll() is None:
+            self.process_executable(self.child.pid)
+            dns = Q.sibling("ethernet_mdns_resolver")
+            state = self.command(
+                [
+                    "/usr/bin/systemctl",
+                    "show",
+                    "sugarkube-ethernet-dns.service",
+                    "--property=MainPID",
+                ]
+            )
+            dns_pid = state.strip().removeprefix("MainPID=")
+            Q.require(dns_pid.isdigit() and int(dns_pid) > 0, "resolver daemon not running")
+            _, expected = dns.resolver_text((dns.STATE / "upstream-resolv.conf").read_text())
+            Q.require(
+                self.e.get("resolver_view") is not None,
+                "staged bootstrap requires directory resolver view",
+            )
+            dns.check_process_view(self.e, str(self.child.pid), dns_pid, expected)
+
+    def quiet(self):
+        """Read-only fail-closed cold-host proof; never kill residual workloads."""
+        unit = self.command(["/usr/bin/systemctl", "show", "k3s.service", "--property=MainPID"])
+        Q.require(unit.strip() == "MainPID=0", "normal K3s main process still present")
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                continue
+            try:
+                comm = (entry / "comm").read_text().strip()
+                cgroup = (entry / "cgroup").read_text()
+                command = (entry / "cmdline").read_bytes().split(b"\0")[0].decode(errors="replace")
+                executable = (entry / "exe").resolve().name
+            except FileNotFoundError:
+                continue
+            Q.require(
+                not any(word in cgroup for word in ("kubepods", "cri-containerd-")),
+                "residual pod cgroup; cold/quiesced host required",
+            )
+            Q.require(
+                not any(
+                    name.startswith(("k3s", "containerd", "kubelet", "kube-proxy"))
+                    or name == "etcd"
+                    for name in (comm, Path(command).name, executable)
+                ),
+                "residual runtime process; cold/quiesced host required",
+            )
+
+    def process_executable(self, pid, allow_wrapper=False):
+        actual = Path(f"/proc/{pid}/exe").resolve()
+        expected = Path(self.opt_in["server_executable"])
+        if allow_wrapper and actual == Path("/usr/local/bin/k3s"):
+            return False
+        Q.require(actual == expected, "K3s internal executable identity changed")
+        return True
+
+    def normal_running(self):
+        unit = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "k3s.service",
+                "--property=ActiveState,SubState,MainPID,InvocationID,NRestarts",
+            ]
+        )
+        state = dict(line.split("=", 1) for line in unit.splitlines())
+        Q.require(
+            state["ActiveState"] in ("activating", "active")
+            and state["SubState"] in ("start-post", "running")
+            and int(state["MainPID"]) > 0,
+            "normal K3s process not running",
+        )
+        proc = Path("/proc") / state["MainPID"]
+        self.process_executable(state["MainPID"])
+        cmdline = (proc / "cmdline").read_bytes()
+        Q.require(b"--disable-agent" not in cmdline, "agentless process cannot complete handover")
+        return state
+
+    def service_context(self):
+        unit = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "k3s.service",
+                "--property=ControlPID,ControlGroup,InvocationID",
+            ]
+        )
+        values = dict(line.split("=", 1) for line in unit.splitlines())
+        groups = [
+            line.split(":", 2)[2] for line in Path("/proc/self/cgroup").read_text().splitlines()
+        ]
+        Q.require(
+            values["ControlPID"] == str(os.getpid())
+            and values["ControlGroup"] in groups
+            and values["ControlGroup"] != "/"
+            and values["InvocationID"] == os.environ.get("INVOCATION_ID")
+            and re.fullmatch("[0-9a-f]{32}", values["InvocationID"]),
+            "staged lifecycle must run as the current k3s service control process",
+        )
+
+    def server_environment(self):
+        unit = self.command(
+            ["/usr/bin/systemctl", "show", "k3s.service", "--property=Environment,EnvironmentFiles"]
+        )
+        values = dict(line.split("=", 1) for line in unit.splitlines())
+        assignments = shlex.split(values["Environment"])
+        for filename in re.findall(
+            r"(/[^ ;]+) \(ignore_errors=(?:yes|no)\)", values["EnvironmentFiles"]
+        ):
+            path = Path(filename)
+            if path.exists():
+                for line in path.read_text().splitlines():
+                    if line.strip() and not line.lstrip().startswith(("#", ";")):
+                        assignments.extend(shlex.split(line))
+        env = {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "HOME": "/root",
+        }
+        for assignment in assignments:
+            key, separator, value = assignment.partition("=")
+            Q.require(
+                separator and re.fullmatch("[A-Za-z_][A-Za-z0-9_]*", key),
+                "unsupported service environment assignment",
+            )
+            env[key] = value
+        for key in ("NOTIFY_SOCKET", "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "INVOCATION_ID"):
+            env.pop(key, None)
+        return env
+
+    def start(self, lease_fd):
+        self.service_context()
+        self.quiet()
+        self.config()
+        unit = self.command(["/usr/bin/systemctl", "show", "k3s.service", "--property=ExecStart"])
+        match = re.search(r"argv\[\]=(.*?) ; ignore_errors=", unit)
+        Q.require(match is not None, "unsupported original server command")
+        argv = shlex.split(match[1])
+        Q.require(argv[:2] == ["/usr/local/bin/k3s", "server"], "original server command required")
+        # inventory() already verified the complete original argv/environment/YAML.
+        # CLI override is ephemeral and used only by this supervised child.
+        env = self.server_environment()
+        self.child = subprocess.Popen(
+            argv + ["--disable-agent=true"], env=env, pass_fds=(lease_fd,)
+        )
+        deadline = time.monotonic() + 30
+        while not self.process_executable(self.child.pid, allow_wrapper=True):
+            self.alive()
+            Q.require(time.monotonic() < deadline, "K3s wrapper did not exec pinned server")
+            time.sleep(0.1)
+        return self.child.pid
+
+    def alive(self):
+        Q.require(
+            self.child is not None and self.child.poll() is None,
+            "bootstrap process exited; no automatic restart",
+        )
+
+    def stop(self):
+        self.alive()
+        self.child.send_signal(signal.SIGTERM)
+        try:
+            self.child.wait(timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            raise Q.Stop("bootstrap did not stop; normal startup forbidden") from exc
+        Q.require(self.child.returncode == 0, "bootstrap did not exit cleanly")
+        self.quiet()
+
+
+class Recovery(Q.DualRecovery):
+    """Address proof after original quorum and numeric peer repair, without Ready."""
+
+    def address_proof(self, ip, old):
+        Q.require(self.local_guard() == ip, "address incident changed")
+        _, members = self.prove_etcd(include_local=True)
+        addresses = {m["id"]: self.b.resolve(m["hostname"]) for m in self.e["members"]}
+        Q.require(len(set(addresses.values())) == 3, "duplicate discovered addresses")
+        for member in self.e["members"]:
+            Q.require(
+                members[member["id"]]["peerURLs"] == Q.dual_urls(member, addresses[member["id"]]),
+                "peer address repair pending",
+            )
+            Q.require(self.read_marker(member) == self.marker(member), "enrollment marker changed")
+        node = self.b.address_node(self.host, self.local["hostname"].removesuffix(".local"))
+        self.address_identity(node, self.local)
+        annotation = node["metadata"]["annotations"].get("k3s.io/internal-ip")
+        addresses = node["status"]["addresses"]
+        internal = [a["address"] for a in addresses if a["type"] == "InternalIP"]
+        Q.require(
+            annotation in (old, ip) and len(internal) == 1 and internal[0] in (old, ip),
+            "unexpected Node address",
+        )
+        for address in addresses:
+            Q.require(
+                set(address) == {"type", "address"}
+                and (
+                    address["type"] == "InternalIP"
+                    or (
+                        address["type"] in ("Hostname", "InternalDNS")
+                        and address["address"]
+                        in (self.local["hostname"], self.local["hostname"].removesuffix(".local"))
+                    )
+                ),
+                "unsupported Node address shape",
+            )
+        return self.host, node
+
+
+class Coordinator:
+    def __init__(self, recovery, path, clock=time.monotonic, sleep=time.sleep):
+        self.r, self.b, self.path = recovery, recovery.b, path
+        self.clock, self.sleep = clock, sleep
+        self.record = json.loads(path.read_text()) if path.exists() else None
+        if self.record:
+            Q.require(re.fullmatch("[0-9a-f]{32}", self.record["token"]), "invalid staged token")
+            Q.require(
+                self.record["member_id"] == recovery.local["id"]
+                and self.record["cluster_id"] == recovery.e["cluster_id"],
+                "staged identity changed",
+            )
+
+    def save(self, phase, **values):
+        self.record.update(values, phase=phase)
+        Q.atomic_json(self.path, self.record)
+
+    def wait(self, operation, deadline):
+        while True:
+            self.b.alive()
+            if operation():
+                return
+            Q.require(self.clock() < deadline, "bootstrap deadline expired; preserve incident")
+            self.sleep(2)
+
+    def membership(self):
+        incident = self.r.previous()
+        if incident["phase"] in ("transport-pending", "waiting-for-lock"):
+            # Only failed READ proofs can be polled. reconcile persists intent before
+            # every write, so a mutation exception escapes and is never replayed.
+            try:
+                self.r.prove_transport(incident)
+            except Q.Stop:
+                self.b.retry_reads()
+                return False
+            if self.r.reconcile(incident) == "waiting-for-lock":
+                return False
+        Q.require(
+            self.r.previous()["phase"] == "completion-pending", "membership outcome unresolved"
+        )
+        try:
+            _, members = self.r.prove_etcd(include_local=True)
+            return all(
+                members[m["id"]]["peerURLs"] == Q.dual_urls(m, self.b.resolve(m["hostname"]))
+                for m in self.r.e["members"]
+            )
+        except Q.Stop:
+            self.b.retry_reads()
+            return False
+
+    def api(self):
+        try:
+            self.r.address_proof(self.record["ip"], self.record["old_ip"])
+            return True
+        except Q.Stop:
+            self.b.retry_reads()
+            return False
+
+    def handover(self):
+        # Reuse the membership lock only after all membership mutations completed.
+        self.save("handover-acquire-intent")
+        result = self.r.transaction(self.record["token"])
+        if result.get("succeeded") is False:
+            self.save("waiting-for-handover")
+            return False
+        Q.require(result.get("succeeded") is True, "handover acquisition outcome unknown")
+        self.save("handover-owned")
+        self.r.owned(self.record["token"])
+        return True
+
+    def pre_start(self, lease_fd):
+        previous = self.r.previous()
+        baseline = (
+            previous["ip"]
+            if previous and previous["phase"] == "complete"
+            else self.r.e["local_ipv4"]
+        )
+        ip = self.r.local_guard()
+        if self.record:
+            Q.require(
+                self.record["phase"] == "normal" and previous and previous["phase"] == "complete",
+                "unfinished staged incident; no replay",
+            )
+            address = json.loads(self.r.address_journal.read_text())
+            Q.require(
+                address["phase"] == "verified"
+                and address["ip"] == self.record["ip"]
+                and previous["ip"] == self.record["ip"],
+                "prior incident evidence differs",
+            )
+            if ip == baseline:
+                # Ordinary simultaneous cold boot must not need any live peer API.
+                return self.r.pre_start()
+            archive = self.path.parent / ("staged-archive-" + self.record["token"] + ".json")
+            bundle = dict(staged=self.record, membership=previous, address=address)
+            if archive.exists():
+                Q.require(json.loads(archive.read_text()) == bundle, "archive conflicts")
+            else:
+                Q.atomic_json(archive, bundle)
+            self.record = None
+        if ip == baseline:
+            return self.r.pre_start()
+        Q.require(self.r.e.get("armed") is True, "fully armed enrollment required")
+        Q.require(not previous or previous["phase"] == "complete", "existing membership incident")
+        if self.r.address_journal.exists():
+            address = json.loads(self.r.address_journal.read_text())
+            Q.require(
+                address["phase"] == "verified" and address["ip"] == baseline,
+                "existing address journal requires review",
+            )
+        self.b.quiet()
+        self.b.stable_address(ip)
+        self.record = dict(
+            member_id=self.r.local["id"],
+            cluster_id=self.r.e["cluster_id"],
+            ip=ip,
+            old_ip=baseline,
+            **{"token": uuid.uuid4().hex},
+        )
+        self.save("bootstrap-start-intent")
+        pid = self.b.start(lease_fd)
+        self.save("bootstrap-running", pid=pid)
+        incident = dict(
+            **{"token": uuid.uuid4().hex},
+            phase="transport-pending",
+            created_at=time.time(),
+            kind="recovery",
+            transport="staged-bootstrap",
+            ip=ip,
+            member_id=self.r.local["id"],
+            cluster_id=self.r.e["cluster_id"],
+            old_peer_urls=Q.dual_urls(self.r.local, baseline),
+            mutation_dispatched=False,
+        )
+        Q.atomic_json(self.r.path, incident)
+        deadline = self.clock() + 600
+        self.wait(self.membership, deadline)
+        self.wait(self.api, deadline)
+        # Own the global turn before any Node mutation as well as process stop.
+        # Otherwise another member can stop between this member's patch and its
+        # required all-voter readback, producing an avoidable unknown outcome.
+        self.save("waiting-for-handover")
+        self.wait(self.handover, deadline)
+        self.r.prepare_node_address(ip, baseline)
+        self.save("addresses-verified-owned")
+        self.r.address_proof(ip, baseline)
+        self.r.address_readback(ip)
+        self.save("bootstrap-stop-intent")
+        self.b.stop()
+        self.save("bootstrap-stopped")
+        # No local endpoint remains. Both original survivors must still prove
+        # authenticated consensus, identity, current peer URLs and Node readback.
+        proof = Q.Recovery(self.r.e, self.b, self.r.path)
+        current, members = proof.prove_etcd()
+        Q.require(
+            current == ip
+            and members[self.r.local["id"]]["peerURLs"] == Q.dual_urls(self.r.local, ip),
+            "handover identity or address changed",
+        )
+        proof.owned(self.record["token"])
+        self.r.address_readback(ip)
+        self.b.quiet()
+        self.save("normal-start-intent", normal_start_at=time.time())
+        return "normal-start-authorized"
+
+    def normal_proof(self):
+        Q.require(self.r.local_guard() == self.record["ip"], "address changed during normal start")
+        self.r.prove_etcd(include_local=True)
+        self.r.address_readback(self.record["ip"])
+        node = self.b.address_node(self.r.host, self.r.local["hostname"].removesuffix(".local"))
+        self.r.address_identity(node, self.r.local)
+        Q.require(
+            any(
+                c.get("type") == "Ready"
+                and c.get("status") == "True"
+                and datetime.fromisoformat(
+                    c["lastHeartbeatTime"].replace("Z", "+00:00")
+                ).timestamp()
+                >= self.record["normal_start_at"]
+                for c in node["status"].get("conditions", [])
+            ),
+            "normal Node not Ready",
+        )
+        self.b.normal_running()
+
+    def post_start(self):
+        if not self.record:
+            return self.r.post_start()
+        Q.require(
+            self.record["phase"] in ("normal-start-intent", "normal"),
+            "staged phase blocks post-start",
+        )
+        if self.record["phase"] == "normal-start-intent":
+            deadline = self.clock() + 120
+            while True:
+                try:
+                    self.normal_proof()
+                    break
+                except Q.Stop:
+                    self.b.retry_reads()
+                    Q.require(
+                        self.clock() < deadline,
+                        "normal startup proof timed out; handover stays owned",
+                    )
+                    self.sleep(2)
+            self.r.owned(self.record["token"])
+            self.save("handover-release-intent")
+            result = self.r.transaction(self.record["token"], release=True)
+            Q.require(result.get("succeeded") is True, "handover release outcome unknown")
+            self.save("normal")
+        # Full cluster/workload readiness can legitimately await the other two
+        # normal-agent handovers. Never fail the successful service start for it.
+        try:
+            return self.r.post_start()
+        except Q.Stop:
+            return "completion-pending"
+
+
+def load_opt_in():
+    Q.trusted_file(OPT_IN)
+    opt = json.loads(OPT_IN.read_text())
+    Q.require(
+        type(opt.get("schema_version")) is int
+        and opt["schema_version"] == 1
+        and opt.get("cold_original_database_bootstrap") is True,
+        "explicit staged bootstrap opt-in required",
+    )
+    Q.trusted_file(Q.ENROLLMENT)
+    Q.require(Q.digest(Q.ENROLLMENT.read_bytes()) == opt["enrollment_sha256"], "enrollment changed")
+    Q.require(
+        re.fullmatch(r"/var/lib/rancher/k3s/data/[0-9a-f]{64}/bin/k3s", opt["server_executable"]),
+        "canonical standard extracted K3s executable required",
+    )
+    Q.require(
+        set(opt["runtime_sha256"])
+        == {
+            str(RUNTIME),
+            str(Q.RUNTIME),
+            "/usr/local/bin/k3s",
+            str(Q.TRANSPORT),
+            str(Q.DESCRIPTOR),
+            str(Q.WAL_RUNTIME),
+            str(RUNTIME.with_name("ethernet_mdns_resolver.py")),
+            opt["server_executable"],
+        },
+        "exact staged and original runtimes must be pinned",
+    )
+    Q.require(
+        all(re.fullmatch("[0-9a-f]{64}", value) for value in opt["runtime_sha256"].values()),
+        "invalid runtime fingerprint",
+    )
+    e = json.loads(Q.ENROLLMENT.read_text())
+    Q.validate_enrollment(e)
+    Q.require(
+        e["schema_version"] == 2 and e.get("armed") is True, "armed version 2 enrollment required"
+    )
+    Q.require(e.get("resolver_view") is not None, "directory resolver enrollment required")
+    return e, opt
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "phase",
+        choices=["hook", "completion-service", "pre-start", "post-start", "check-completion"],
+    )
+    args = parser.parse_args()
+    if args.phase in ("hook", "completion-service"):
+        print((hook() if args.phase == "hook" else completion_service()).decode(), end="")
+        return 0
+    b = coordinator = None
+
+    def interrupted(signum, frame):
+        raise Q.Stop("startup interrupted; explicit incident review required")
+
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    try:
+        Q.require(os.geteuid() == 0, "root required")
+        e, opt = load_opt_in()
+        Q.private_state(STATE)
+        b = Backend(e, opt)
+        with (STATE / "lock").open("a") as lock, (STATE / "bootstrap.lock").open("a") as lease:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            r = Recovery(e, b, STATE / "incident.json")
+            coordinator = Coordinator(r, STATE / "staged.json")
+            migration_guard(b)
+            if args.phase in ("pre-start", "post-start"):
+                b.service_context()
+            if args.phase == "pre-start":
+                result = coordinator.pre_start(lease.fileno())
+            elif args.phase == "post-start":
+                result = coordinator.post_start()
+            else:
+                Q.require(
+                    coordinator.record is None or coordinator.record["phase"] == "normal",
+                    "unfinished staged lifecycle; no automatic replay",
+                )
+                b.config()
+                previous = r.previous()
+                baseline = (
+                    previous["ip"]
+                    if previous and previous["phase"] == "complete"
+                    else e["local_ipv4"]
+                )
+                if coordinator.record is not None:
+                    baseline = coordinator.record["ip"]
+                Q.require(
+                    b.address() == baseline,
+                    "running address change requires cold/quiesced recovery; no automatic stop",
+                )
+                result = r.post_start()
+        print(result)
+        return 0
+    except (
+        RuntimeError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        subprocess.SubprocessError,
+    ) as exc:
+        print(f"Staged recovery blocked: {exc}. Preserve all journals; no automatic replay.")
+        if b is not None and b.child is not None and b.child.poll() is None:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            try:
+                coordinator.save("cleanup-stop-intent", failed_phase=coordinator.record["phase"])
+                b.stop()
+                coordinator.save("cleanup-stopped")
+            except (Q.Stop, OSError):
+                print("Bootstrap cleanup unconfirmed; normal startup remains forbidden.")
+        return 2
+    finally:
+        if b is not None:
+            b.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
