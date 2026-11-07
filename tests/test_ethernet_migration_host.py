@@ -615,3 +615,44 @@ def test_installed_backend_executes_only_fixed_path_pinned_bytes(files, monkeypa
     monkeypatch.setattr(files, "read", lambda path: b"raise AssertionError('must not execute')")
     with pytest.raises(H.plan.Refused, match="pinned phase"):
         host.installed_backend(host.e)
+
+
+def test_absent_metadata_is_explicit(files):
+    record = files.metadata("/absent")
+    assert record == {
+        "kind": "absent",
+        "uid": 0,
+        "gid": 0,
+        "mode": 0,
+        "sha256": None,
+        "digest_kind": "none",
+    }
+
+
+def test_untrusted_sibling_is_not_executed(tmp_path, monkeypatch):
+    runtime = tmp_path / "unsafe.py"
+    runtime.write_text("raise AssertionError('must not execute')")
+    runtime.chmod(0o666)
+    monkeypatch.setattr(H, "__file__", str(tmp_path / "ethernet_migration_host.py"))
+    with pytest.raises(RuntimeError, match="untrusted migration runtime"):
+        H.sibling("unsafe")
+
+
+def test_consumer_scan_ignores_self_and_exited_processes(files):
+    proc = files.root / "proc"
+    proc.mkdir()
+    (proc / "self").mkdir()
+    (proc / str(os.getpid())).mkdir()
+    (proc / "999999").mkdir()  # Gone before cmdline could be read.
+    host, fake = adapter(fixtures.sample(), files)
+    host.verify_no_consumers()
+    assert fake.calls == []
+
+
+def test_entrypoint_help_does_not_touch_host(monkeypatch):
+    import runpy
+
+    monkeypatch.setattr(sys, "argv", [H.__file__, "--help"])
+    with pytest.raises(SystemExit) as result:
+        runpy.run_path(H.__file__, run_name="__main__")
+    assert result.value.code == 0

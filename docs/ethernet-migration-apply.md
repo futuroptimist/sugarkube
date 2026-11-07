@@ -33,6 +33,10 @@ recognize migration intent and cannot safely fence migration activation.
 
 ## Private operational receipt
 
+The receipt must be root-owned with mode `0600`. Local files read by the adapter
+are bounded to 128 MiB each; larger backup artifacts require a separately reviewed
+streaming implementation rather than bypassing the limit.
+
 The receipt is a trusted private operator input, not proof that the assistant
 performed or observed an operational action. The host adapter validates its exact
 schema and checks:
