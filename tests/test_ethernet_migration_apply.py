@@ -311,14 +311,29 @@ def test_expiry_during_lock_reproof_latches_without_stopping(case):
     assert (case[5].directory / "migration-intent.json").exists()
 
 
-def test_previous_guarded_catalog_is_preserved_not_rewritten():
-    previous_path = A.CATALOG.with_name("resolver-v1-to-guarded-directory-v1.json")
+@pytest.mark.parametrize(
+    "version,expected_hash,revision",
+    [
+        (
+            1,
+            "d7046d634e3a7f7faeb8557de8c00a42dd2de9894771bf4090d02881845510a8",
+            "09653988b32cfc4f866aa98fff90a8f0e12f6abd",
+        ),
+        (
+            2,
+            "c3b9f453be2ef4f75dc1f7e03a52726a272b4d3f5cec668fd49a0b619c6543e4",
+            "ebf4748d5d84e61bfbc61493df7f95278cfc68e2",
+        ),
+    ],
+)
+def test_previous_guarded_catalog_is_preserved_not_rewritten(version, expected_hash, revision):
+    previous_path = A.CATALOG.with_name(f"resolver-v1-to-guarded-directory-v{version}.json")
     raw = previous_path.read_bytes()
-    assert P.sha(raw) == "d7046d634e3a7f7faeb8557de8c00a42dd2de9894771bf4090d02881845510a8"
+    assert P.sha(raw) == expected_hash
     previous = P.parse(raw)
     current = P.parse(A.CATALOG.read_bytes())
-    assert previous["revisions"]["target"] == "09653988b32cfc4f866aa98fff90a8f0e12f6abd"
-    assert current["revisions"]["target"] == "ebf4748d5d84e61bfbc61493df7f95278cfc68e2"
+    assert previous["revisions"]["target"] == revision
+    assert current["revisions"]["target"] == "d8a75e5115cf744bdd5aaaee7d34bc7d5db39d2f"
     assert previous["artifacts"]["source"] == current["artifacts"]["source"]
     assert (
         previous["artifacts"]["target"]["templates"] == current["artifacts"]["target"]["templates"]

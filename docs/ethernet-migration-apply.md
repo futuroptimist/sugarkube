@@ -9,10 +9,11 @@ against a real server.
 The [historical read-only planner](ethernet-migration-planner.md) and its catalog
 remain unchanged. `ethernet_migration_apply.guarded_plan(bundle)` evaluates the same
 source admission rules against a separate immutable guarded target catalog,
-`resolver-v1-to-guarded-directory-v2.json`. The earlier guarded v1 catalog remains
-unchanged for provenance; v2 pins the controller correction for canonical
-completed-enrollment comparison. An earlier plan or approval receipt is not
-automatically upgraded: regenerate and review the exact v2 plan and receipt.
+`resolver-v1-to-guarded-directory-v3.json`. The earlier guarded v1 and v2 catalogs
+remain unchanged for provenance. The v2 target corrected canonical completed
+enrollment comparison; v3 additionally binds migration record reads to verified
+file descriptors. An earlier plan or approval receipt is not automatically
+upgraded: regenerate and review the exact v3 plan and receipt.
 A plan still says
 `authorized_to_execute: false`. A plan is not operational authorization.
 
@@ -127,6 +128,12 @@ actions. A pre-start permit binds the exact owner, installed target enrollment,
 original incident and baseline Ethernet address. The guard independently checks
 configuration, database identity, network, absent Node-address intent and current
 cluster lock ownership.
+
+Guard records and the exact active enrollment/incident bytes are read through
+no-follow, nonblocking file descriptors. Their validated file identity, ownership,
+mode, size and timestamps must remain unchanged from the initial trust check
+through the open descriptor and final path readback. Symlinks, hard links, file
+replacement, growth and other metadata drift refuse before authorization.
 
 The guard also verifies the real systemd invocation ID, startup substate and
 control group, plus the process's own unified control-group membership. The
