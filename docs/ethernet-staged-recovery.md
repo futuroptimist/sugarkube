@@ -132,6 +132,8 @@ handover. It refuses a running address change without stopping or restarting any
 service. A running server may retain pod shims even after its main K3s process
 stops, so this implementation does **not** claim unattended running-churn recovery.
 Cold/quiesced admission and live DHCP behavior remain distinct qualification cases.
+The separately armed [whole-host reboot handoff](ethernet-running-reboot-handoff.md)
+provides a defined running-host mode; it is not enabled by this cold-only opt-in.
 
 ## Required qualification
 

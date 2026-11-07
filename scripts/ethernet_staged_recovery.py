@@ -67,6 +67,30 @@ def completion_service():
     ).encode()
 
 
+def running_service():
+    return (
+        completion_service()
+        .replace(b"check-completion", b"watch-running")
+        .replace(
+            b"Verify staged Ethernet recovery completion",
+            b"Observe explicitly armed host reboot recovery",
+        )
+    )
+
+
+def reboot_handoff(recovery, backend, opt_in):
+    pending = STATE / "reboot-handoff.json"
+    if opt_in.get("reboot_handoff") is None:
+        Q.require(
+            not pending.exists() and not pending.is_symlink(),
+            "reboot handoff state exists without its explicit opt-in",
+        )
+        return None
+    backend.config()  # Verify the extra module hash before importing it.
+    module = Q.sibling("ethernet_reboot_handoff")
+    return module.Handoff(Q, recovery, backend, opt_in, STATE)
+
+
 class Backend(Q.Backend):
     def __init__(self, enrollment, opt_in):
         super().__init__(enrollment)
@@ -264,6 +288,151 @@ class Backend(Q.Backend):
             env.pop(key, None)
         return env
 
+    def boot_id(self):
+        value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        Q.require(
+            re.fullmatch("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", value),
+            "invalid kernel boot identity",
+        )
+        return value
+
+    def running_network(self, ip, baseline):
+        """Read-only old-or-current managed YAML proof before a host reboot."""
+        self.config()
+        local = next(m for m in self.e["members"] if m["id"] == self.e["local_member_id"])
+        Q.require(
+            self.address() == ip and self.resolve(local["hostname"]) == ip,
+            "running Ethernet/mDNS address changed",
+        )
+        path = Path("/etc/rancher/k3s/config.yaml.d/20-sugarkube-network.yaml")
+        Q.trusted_file(path)
+        content = path.read_bytes()
+        for candidate in (baseline, ip):
+            expected = (
+                f'# Managed by configure_k3s_node_ip.sh\nnode-ip: "{candidate}"\n'
+                f'flannel-iface: "{self.e["interface"]}"\n'
+            ).encode()
+            if content == expected:
+                return {"configured_ip": candidate, "network_sha256": Q.digest(content)}
+        raise Q.Stop("running managed network YAML must exactly match old or current address")
+
+    def reboot_admission(self):
+        version = self.command(["/usr/bin/systemctl", "--version"]).splitlines()[0]
+        Q.require(re.match(r"systemd 255(?: |$)", version), "reboot requires pinned systemd 255")
+        state = dict(
+            line.split("=", 1)
+            for line in self.command(
+                [
+                    "/usr/bin/systemctl",
+                    "show",
+                    "k3s.service",
+                    "--property=ActiveState,SubState,MainPID,ControlPID,Job,InvocationID,"
+                    "NeedDaemonReload,KillMode,Delegate",
+                ]
+            ).splitlines()
+        )
+        Q.require(
+            state["NeedDaemonReload"] == "no"
+            and state["KillMode"] == "process"
+            and state["Delegate"] == "yes"
+            and state["ControlPID"] == "0"
+            and state["Job"] in ("", "0"),
+            "service job or unsupported lifecycle blocks reboot",
+        )
+        output = self.command(
+            ["/usr/bin/systemctl", "list-jobs", "--no-legend", "--no-pager", "--plain", "--full"]
+        )
+        rows = [line.split() for line in output.splitlines() if line.strip()]
+        if rows:
+            Q.require(
+                len(rows) == 1
+                and len(rows[0]) == 4
+                and rows[0][0].isdigit()
+                and rows[0][1:] == ["sugarkube-ethernet-recovery.service", "start", "running"],
+                "competing or unrecognized systemd jobs block reboot",
+            )
+            self.own_watcher_job(rows[0][0])
+        if state["ActiveState"] == "active" and state["SubState"] == "running":
+            Q.require(
+                state["MainPID"].isdigit() and int(state["MainPID"]) > 0,
+                "invalid normal server process",
+            )
+            self.process_executable(state["MainPID"])
+            Q.require(
+                re.fullmatch("[0-9a-f]{32}", state["InvocationID"]), "invalid service invocation"
+            )
+        else:
+            Q.require(
+                (state["ActiveState"], state["SubState"])
+                in (("inactive", "dead"), ("failed", "failed"))
+                and state["MainPID"] == "0",
+                "only stable running or stopped original service may request reboot",
+            )
+        return state
+
+    def own_watcher_job(self, job_id):
+        Q.trusted_file(Q.WATCH_SERVICE)
+        Q.require(
+            Q.WATCH_SERVICE.read_bytes() == running_service(), "running watcher artifact changed"
+        )
+        output = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "sugarkube-ethernet-recovery.service",
+                "--property=Type,User,MainPID,ControlPID,ActiveState,SubState,Job,"
+                "ControlGroup,InvocationID,NeedDaemonReload,DropInPaths,ExecStart",
+            ]
+        )
+        state = dict(line.split("=", 1) for line in output.splitlines())
+        invocation = os.environ.get("INVOCATION_ID")
+        expected = f"/usr/bin/timeout 180s /usr/bin/python3 -I {RUNTIME} watch-running"
+        commands = re.findall(r"argv\[\]=(.*?) ; ignore_errors=(yes|no) ;", state["ExecStart"])
+        Q.require(
+            state["Type"] == "oneshot"
+            and state["User"] == "root"
+            and state["ActiveState"] == "activating"
+            and state["SubState"] == "start"
+            and state["ControlPID"] == "0"
+            and state["Job"] == job_id
+            and state["NeedDaemonReload"] == "no"
+            and not state["DropInPaths"]
+            and state["InvocationID"] == invocation
+            and re.fullmatch("[0-9a-f]{32}", invocation or "")
+            and commands == [(expected, "no")],
+            "current watcher job identity differs",
+        )
+        groups = [
+            line.split(":", 2)[2] for line in Path("/proc/self/cgroup").read_text().splitlines()
+        ]
+        parent = str(os.getppid())
+        Q.require(
+            state["MainPID"] == parent
+            and parent != "1"
+            and state["ControlGroup"] in groups
+            and state["ControlGroup"] != "/",
+            "watcher timeout parent/cgroup differs",
+        )
+        proc = Path("/proc") / parent
+        Q.require(
+            (proc / "exe").resolve() == Path("/usr/bin/timeout").resolve()
+            and (proc / "cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+            == [arg.encode() for arg in expected.split()],
+            "watcher parent executable/argv differs",
+        )
+        Q.require(
+            Path("/proc/self/cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+            == [arg.encode() for arg in expected.split()[2:]],
+            "watcher child argv differs",
+        )
+
+    def request_reboot(self):
+        # systemd255 logind/reboot.target dispatch is asynchronous. This returns
+        # only request acceptance, never proof of shutdown or a new boot.
+        self.command(
+            ["/usr/bin/systemctl", "--no-block", "--no-wall", "--check-inhibitors=yes", "reboot"]
+        )
+
     def start(self, lease_fd):
         self.service_context()
         self.quiet()
@@ -346,6 +515,7 @@ class Coordinator:
     def __init__(self, recovery, path, clock=time.monotonic, sleep=time.sleep):
         self.r, self.b, self.path = recovery, recovery.b, path
         self.clock, self.sleep = clock, sleep
+        self.handoff = None
         self.record = json.loads(path.read_text()) if path.exists() else None
         if self.record:
             Q.require(re.fullmatch("[0-9a-f]{32}", self.record["token"]), "invalid staged token")
@@ -459,13 +629,16 @@ class Coordinator:
             cluster_id=self.r.e["cluster_id"],
             ip=ip,
             old_ip=baseline,
+            membership_id=uuid.uuid4().hex,
             **{"token": uuid.uuid4().hex},
         )
         self.save("bootstrap-start-intent")
+        if self.handoff is not None:
+            self.handoff.bind_staged(self.record)
         pid = self.b.start(lease_fd)
         self.save("bootstrap-running", pid=pid)
         incident = dict(
-            **{"token": uuid.uuid4().hex},
+            **{"token": self.record["membership_id"]},
             phase="transport-pending",
             created_at=time.time(),
             kind="recovery",
@@ -575,18 +748,39 @@ def load_opt_in():
         re.fullmatch(r"/var/lib/rancher/k3s/data/[0-9a-f]{64}/bin/k3s", opt["server_executable"]),
         "canonical standard extracted K3s executable required",
     )
+    expected_runtimes = {
+        str(RUNTIME),
+        str(Q.RUNTIME),
+        "/usr/local/bin/k3s",
+        str(Q.TRANSPORT),
+        str(Q.DESCRIPTOR),
+        str(Q.WAL_RUNTIME),
+        str(RUNTIME.with_name("ethernet_mdns_resolver.py")),
+        opt["server_executable"],
+    }
+    if opt.get("reboot_handoff") is not None:
+        Q.require(isinstance(opt["reboot_handoff"], dict), "invalid reboot opt-in structure")
+        Q.require(
+            type(opt["reboot_handoff"].get("schema_version")) is int
+            and type(opt["reboot_handoff"].get("systemd_major")) is int
+            and opt["reboot_handoff"].get("whole_host_reboot") is True
+            and opt["reboot_handoff"]
+            == {
+                "schema_version": 1,
+                "whole_host_reboot": True,
+                "systemd_major": 255,
+            },
+            "explicit whole-host reboot opt-in required",
+        )
+        expected_runtimes.update(
+            {
+                str(RUNTIME.with_name("ethernet_reboot_handoff.py")),
+                "/usr/bin/systemctl",
+                "/usr/bin/timeout",
+            }
+        )
     Q.require(
-        set(opt["runtime_sha256"])
-        == {
-            str(RUNTIME),
-            str(Q.RUNTIME),
-            "/usr/local/bin/k3s",
-            str(Q.TRANSPORT),
-            str(Q.DESCRIPTOR),
-            str(Q.WAL_RUNTIME),
-            str(RUNTIME.with_name("ethernet_mdns_resolver.py")),
-            opt["server_executable"],
-        },
+        set(opt["runtime_sha256"]) == expected_runtimes,
         "exact staged and original runtimes must be pinned",
     )
     Q.require(
@@ -606,11 +800,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "phase",
-        choices=["hook", "completion-service", "pre-start", "post-start", "check-completion"],
+        choices=[
+            "hook",
+            "completion-service",
+            "running-service",
+            "pre-start",
+            "post-start",
+            "check-completion",
+            "watch-running",
+        ],
     )
     args = parser.parse_args()
-    if args.phase in ("hook", "completion-service"):
-        print((hook() if args.phase == "hook" else completion_service()).decode(), end="")
+    if args.phase in ("hook", "completion-service", "running-service"):
+        artifact = {
+            "hook": hook,
+            "completion-service": completion_service,
+            "running-service": running_service,
+        }[args.phase]()
+        print(artifact.decode(), end="")
         return 0
     b = coordinator = None
 
@@ -630,12 +837,19 @@ def main():
             r = Recovery(e, b, STATE / "incident.json")
             coordinator = Coordinator(r, STATE / "staged.json")
             migration_guard(b)
+            handoff = reboot_handoff(r, b, opt)
+            coordinator.handoff = handoff
             if args.phase in ("pre-start", "post-start"):
                 b.service_context()
             if args.phase == "pre-start":
+                if handoff is not None:
+                    handoff.before_start()
                 result = coordinator.pre_start(lease.fileno())
             elif args.phase == "post-start":
                 result = coordinator.post_start()
+            elif args.phase == "watch-running":
+                Q.require(handoff is not None, "whole-host reboot opt-in required")
+                result = handoff.watch()
             else:
                 Q.require(
                     coordinator.record is None or coordinator.record["phase"] == "normal",
