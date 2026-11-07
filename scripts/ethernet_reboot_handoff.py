@@ -8,6 +8,7 @@ The caller owns the normal recovery locks and invokes only pinned service tools.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import uuid
@@ -134,6 +135,38 @@ class Handoff:
             "membership incident differs from reboot handoff",
         )
 
+    def ordinary_completion(self, ip, incident):
+        path = self.state / "staged.json"
+        if not (path.exists() or path.is_symlink()):
+            return False
+        self.q.trusted_file(path)
+        staged = json.loads(path.read_text())
+        self.q.require(
+            staged["phase"] == "normal"
+            and staged["member_id"] == self.r.local["id"]
+            and staged["cluster_id"] == self.r.e["cluster_id"]
+            and re.fullmatch("[0-9a-f]{32}", staged["token"])
+            and incident
+            and re.fullmatch("[0-9a-f]{32}", staged["membership_id"])
+            and staged["membership_id"] == incident["token"]
+            and incident["member_id"] == self.r.local["id"]
+            and incident["cluster_id"] == self.r.e["cluster_id"]
+            and incident["ip"] == staged["ip"]
+            and incident["phase"] in ("completion-pending", "verifying", "complete"),
+            "ordinary staged completion identity or phase differs",
+        )
+        self.q.trusted_file(self.r.address_journal)
+        address = json.loads(self.r.address_journal.read_text())
+        self.q.require(
+            address["phase"] == "verified"
+            and address["member_id"] == self.r.local["id"]
+            and address["cluster_id"] == self.r.e["cluster_id"]
+            and address["node_uid"] == self.r.local["node_uid"]
+            and address["ip"] == staged["ip"],
+            "ordinary staged Node evidence differs",
+        )
+        return ip == staged["ip"]
+
     def watch(self):
         self.b.config()
         boot, ip = self.b.boot_id(), self.b.address()
@@ -155,7 +188,7 @@ class Handoff:
             if self.r.previous()["phase"] == "complete":
                 self.save("complete")
             return result
-        if ip == baseline:
+        if self.ordinary_completion(ip, incident) or ip == baseline:
             return self.r.post_start()
         self.clean_previous(baseline)
         self.q.require(self.r.e.get("armed") is True, "armed enrollment required for reboot")
@@ -166,6 +199,12 @@ class Handoff:
         if self.observation.exists() or self.observation.is_symlink():
             self.q.trusted_file(self.observation)
             observed = json.loads(self.observation.read_text())
+            self.q.require(
+                isinstance(observed, dict)
+                and type(observed.get("monotonic")) in (int, float)
+                and math.isfinite(observed["monotonic"]),
+                "invalid debounce observation",
+            )
         expected = {"boot_id": boot, "ip": ip, "old_ip": baseline, "network": network}
         if (
             any(observed.get(key) != value for key, value in expected.items())

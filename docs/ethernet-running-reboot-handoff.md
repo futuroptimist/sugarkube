@@ -186,3 +186,10 @@ all-member transitions, inhibitor refusal, delayed/failed shutdown, actual reboo
 address changes during boot, repeated completed incidents, original committed
 markers and persistent storage, and final workload/HTTPS convergence. Other
 systemd versions and nonstandard service layouts remain unsupported.
+
+
+Ordinary cold recovery remains supported with this mode enabled even when no
+reboot was requested. The running watcher checks the exact normal staged record,
+linked membership incident and verified Node journal before continuing workload
+completion. Repeated completion checks do not create reboot intent. Unknown phases
+or mismatched identity, address or incident evidence remain blocked.

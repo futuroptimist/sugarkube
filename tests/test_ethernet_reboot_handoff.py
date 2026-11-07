@@ -491,6 +491,10 @@ def test_opt_in_requires_reboot_tools_and_explicit_scope(fleet, tmp_path, monkey
     )
     optfile.write_text(json.dumps(opt))
     assert S.load_opt_in() == (e, opt)
+    malformed = dict(opt, runtime_sha256=list(opt["runtime_sha256"]))
+    optfile.write_text(json.dumps(malformed))
+    with pytest.raises(Q.Stop, match="must be pinned"):
+        S.load_opt_in()
     opt["reboot_handoff"]["whole_host_reboot"] = False
     optfile.write_text(json.dumps(opt))
     with pytest.raises(Q.Stop, match="whole-host reboot"):
@@ -753,3 +757,54 @@ def test_prestart_nonblocking_lease_then_durable_same_boot_fence(fleet, monkeypa
     request_all([handoff], now)
     assert S.main() == 2
     assert not b.boot and b.requests == ["reboot"]
+
+
+def test_ordinary_cold_recovery_completes_through_running_watcher(fleet):
+    c, coordinators, handoffs, _ = fleet
+
+    def run(coordinator):
+        assert coordinator.pre_start(99) == "normal-start-authorized"
+        coordinator.b.normal()
+        coordinator.post_start()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(run, coordinators))
+    for handoff in handoffs:
+        assert handoff.record is None and handoff.b.requests == []
+        handoff.watch()
+        incident = handoff.r.previous()
+        if incident["phase"] == "verifying":
+            incident["verified_at_monotonic"] -= 31
+            Q.atomic_json(handoff.r.path, incident)
+        assert handoff.watch() == "complete"
+        assert handoff.watch() == "unchanged"
+        assert handoff.record is None and handoff.b.requests == []
+
+
+@pytest.mark.parametrize(
+    "field", ["phase", "member_id", "cluster_id", "token", "membership_id", "ip"]
+)
+def test_ordinary_completion_rejects_mismatched_staged_evidence(fleet, field):
+    _, coordinators, (handoff, *_), _ = fleet
+    D.completed(coordinators[0])
+    staged = json.loads(coordinators[0].path.read_text())
+    staged["membership_id"] = "b" * 32
+    incident = handoff.r.previous()
+    incident.update(
+        member_id=handoff.r.local["id"], cluster_id=handoff.r.e["cluster_id"], **{"token": "b" * 32}
+    )
+    Q.atomic_json(handoff.r.path, incident)
+    staged[field] = "wrong"
+    Q.atomic_json(coordinators[0].path, staged)
+    with pytest.raises(Q.Stop):
+        handoff.watch()
+    assert handoff.b.requests == []
+
+
+@pytest.mark.parametrize("value", [[], {"monotonic": "bad"}, {"monotonic": float("nan")}])
+def test_malformed_debounce_refuses_without_dispatch(fleet, value):
+    _, _, (handoff, *_), _ = fleet
+    handoff.observation.write_text(json.dumps(value))
+    with pytest.raises(Q.Stop, match="invalid debounce"):
+        handoff.watch()
+    assert not handoff.path.exists() and handoff.b.requests == []

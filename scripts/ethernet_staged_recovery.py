@@ -91,6 +91,10 @@ def reboot_handoff(recovery, backend, opt_in):
     return module.Handoff(Q, recovery, backend, opt_in, STATE)
 
 
+class ReadUnavailable(Q.Stop):
+    """Bounded GET transport retries exhausted; no mutation was repeated."""
+
+
 class Backend(Q.Backend):
     def __init__(self, enrollment, opt_in):
         super().__init__(enrollment)
@@ -107,12 +111,25 @@ class Backend(Q.Backend):
             raise
 
     def address_node(self, host, node_name, patch=None, status=False):
-        try:
-            return super().address_node(host, node_name, patch, status)
-        except Q.Stop:
-            if patch is not None:
-                self.write_failed = True
-            raise
+        for attempt in range(3):
+            try:
+                return super().address_node(host, node_name, patch, status)
+            except (Q.Stop, OSError) as exc:
+                if patch is not None:
+                    self.write_failed = True
+                    raise
+                # Only known connection loss/refusal/timeouts on GET are
+                # retryable, plus explicit HTTP 503 startup unavailability.
+                # TLS, other HTTP statuses, JSON and identity failures are not.
+                cause = exc.__cause__ if isinstance(exc, Q.Stop) else exc
+                unavailable = isinstance(cause, (ConnectionError, TimeoutError)) or (
+                    isinstance(exc, Q.Stop) and str(exc) == "Node API HTTP 503; no retry"
+                )
+                if self.write_failed or not unavailable:
+                    raise
+                if attempt == 2:
+                    raise ReadUnavailable("Node GET temporarily unavailable") from exc
+                time.sleep(2)
 
     def retry_reads(self):
         Q.require(not self.write_failed, "uncertain mutation forbids transport retry")
@@ -476,6 +493,50 @@ class Backend(Q.Backend):
 class Recovery(Q.DualRecovery):
     """Address proof after original quorum and numeric peer repair, without Ready."""
 
+    def prepare_node_address(self, ip, old):
+        # The base method need not persist a journal if native controllers have
+        # already converged locally. Retain its exact baseline only for this call.
+        self.readback_baseline = (ip, old)
+        try:
+            return super().prepare_node_address(ip, old)
+        finally:
+            del self.readback_baseline
+
+    def address_readback(self, ip):
+        Q.require(not self.address_journal.is_symlink(), "symlink Node journal unsupported")
+        record = (
+            json.loads(self.address_journal.read_text())
+            if self.address_journal.exists()
+            else {"phase": "prepared", "old_ip": ip}
+        )
+        Q.require(
+            record["phase"] in ("prepared", "annotation-confirmed", "status-confirmed", "verified")
+            and not getattr(self.b, "write_failed", False),
+            "uncertain Node mutation forbids readback retry",
+        )
+        baseline = getattr(self, "readback_baseline", (ip, record["old_ip"]))
+        Q.require(baseline[0] == ip, "readback baseline address differs")
+        old = baseline[1]
+        for member in self.survivors:
+            for attempt in range(3):
+                node = self.b.address_node(
+                    member["hostname"], self.local["hostname"].removesuffix(".local")
+                )
+                self.address_identity(node, self.local)
+                annotation = node["metadata"]["annotations"].get("k3s.io/internal-ip")
+                internal = [
+                    a["address"] for a in node["status"]["addresses"] if a["type"] == "InternalIP"
+                ]
+                Q.require(
+                    annotation in (old, ip) and internal in ([old], [ip]),
+                    "unexpected Node address during readback",
+                )
+                if annotation == ip and internal == [ip]:
+                    break
+                Q.require(attempt < 2, "Node address readback has not converged")
+                time.sleep(2)
+        Q.require(self.local_guard() == ip, "address changed after Node reconciliation")
+
     def address_proof(self, ip, old):
         Q.require(self.local_guard() == ip, "address incident changed")
         _, members = self.prove_etcd(include_local=True)
@@ -517,6 +578,7 @@ class Coordinator:
         self.r, self.b, self.path = recovery, recovery.b, path
         self.clock, self.sleep = clock, sleep
         self.handoff = None
+        Q.require(not path.is_symlink(), "symlink staged journal unsupported")
         self.record = json.loads(path.read_text()) if path.exists() else None
         if self.record:
             Q.require(re.fullmatch("[0-9a-f]{32}", self.record["token"]), "invalid staged token")
@@ -564,12 +626,21 @@ class Coordinator:
             return False
 
     def api(self):
+        # Every original API must serve the same enrolled Node before any write.
+        # An identity error is never treated as API startup delay.
+        for member in self.r.e["members"]:
+            try:
+                node = self.b.address_node(
+                    member["hostname"], self.r.local["hostname"].removesuffix(".local")
+                )
+            except ReadUnavailable:
+                return False
+            self.r.address_identity(node, self.r.local)
         try:
             self.r.address_proof(self.record["ip"], self.record["old_ip"])
-            return True
-        except Q.Stop:
-            self.b.retry_reads()
+        except ReadUnavailable:
             return False
+        return True
 
     def handover(self):
         # Reuse the membership lock only after all membership mutations completed.
@@ -737,6 +808,7 @@ class Coordinator:
 def load_opt_in():
     Q.trusted_file(OPT_IN)
     opt = json.loads(OPT_IN.read_text())
+    Q.require(isinstance(opt, dict), "invalid staged opt-in mapping")
     Q.require(
         type(opt.get("schema_version")) is int
         and opt["schema_version"] == 1
@@ -781,7 +853,7 @@ def load_opt_in():
             }
         )
     Q.require(
-        set(opt["runtime_sha256"]) == expected_runtimes,
+        isinstance(opt["runtime_sha256"], dict) and set(opt["runtime_sha256"]) == expected_runtimes,
         "exact staged and original runtimes must be pinned",
     )
     Q.require(
@@ -874,6 +946,7 @@ def main():
         return 0
     except (
         RuntimeError,
+        AttributeError,
         OSError,
         ValueError,
         KeyError,

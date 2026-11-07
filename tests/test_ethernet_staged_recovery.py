@@ -67,7 +67,8 @@ class Backend(D.Backend):
 
     def address_node(self, host, name, patch=None, status=False):
         with self.c.mutex:
-            Q.require(host[2] in self.c.active, "API unavailable")
+            if host[2] not in self.c.active:
+                raise S.ReadUnavailable("API unavailable")
             # API cannot become ready until this member's numeric URL is repaired.
             Q.require(
                 self.c.members[host[2]]["peerURLs"][0] == f"https://{self.c.ips[host[2]]}:2380",
@@ -611,7 +612,8 @@ def test_cli_dispatch_without_host_execution(cluster, monkeypatch, phase):
 
 
 @pytest.mark.parametrize("cleanup_ok", [True, False])
-def test_cli_signal_cleanup_preserves_failure_phase(cluster, monkeypatch, cleanup_ok):
+@pytest.mark.parametrize("failure", ["signal", "shape"])
+def test_cli_signal_cleanup_preserves_failure_phase(cluster, monkeypatch, cleanup_ok, failure):
     _, (controller, *_) = cluster
     b, r = controller.b, controller.r
     controller.record = dict(
@@ -637,7 +639,13 @@ def test_cli_signal_cleanup_preserves_failure_phase(cluster, monkeypatch, cleanu
     monkeypatch.setattr(b, "stop", stop)
     handlers = {}
     monkeypatch.setattr(S.signal, "signal", lambda sig, handler: handlers.update({sig: handler}))
-    monkeypatch.setattr(controller, "pre_start", lambda fd: handlers[S.signal.SIGTERM](15, None))
+
+    def fail(fd):
+        if failure == "shape":
+            raise AttributeError("malformed readiness condition")
+        handlers[S.signal.SIGTERM](15, None)
+
+    monkeypatch.setattr(controller, "pre_start", fail)
     monkeypatch.setattr(__import__("sys"), "argv", ["staged", "pre-start"])
     assert S.main() == 2
     assert controller.record["phase"] == (
@@ -734,3 +742,176 @@ def test_extracted_process_pin_distinguishes_initial_wrapper(tmp_path, monkeypat
     assert b.process_executable(10, allow_wrapper=True) is False
     with pytest.raises(Q.Stop, match="internal executable"):
         b.process_executable(10)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "connection",
+        "wrapped",
+        "timeout",
+        "unavailable",
+        "identity",
+        "tls",
+        "http",
+        "json",
+        "unknown-write",
+    ],
+)
+def test_node_get_retry_is_narrow_and_never_replays_patch(monkeypatch, failure):
+    import ssl
+
+    b = S.Backend({}, {})
+    calls, sleeps = [], []
+    monkeypatch.setattr(S.time, "sleep", sleeps.append)
+
+    def request(self, host, node, patch=None, status=False):
+        calls.append(patch)
+        if failure == "identity":
+            raise Q.Stop("identity differs")
+        if failure == "tls":
+            raise ssl.SSLCertVerificationError("wrong CA")
+        if failure == "http":
+            raise Q.Stop("Node API HTTP 403; no retry")
+        if failure == "unavailable":
+            raise Q.Stop("Node API HTTP 503; no retry")
+        if failure == "json":
+            raise Q.Stop("response invalid") from ValueError("bad JSON")
+        if failure == "wrapped":
+            raise Q.Stop("transport") from ConnectionResetError()
+        if failure == "timeout":
+            raise TimeoutError()
+        raise ConnectionRefusedError()
+
+    monkeypatch.setattr(Q.Backend, "address_node", request)
+    patch = [{"op": "test"}] if failure == "unknown-write" else None
+    with pytest.raises((Q.Stop, OSError)):
+        b.address_node("peer", "node", patch)
+    retry = failure in ("connection", "wrapped", "timeout", "unavailable")
+    assert len(calls) == (3 if retry else 1)
+    assert sleeps == ([2, 2] if retry else [])
+    assert b.write_failed is (patch is not None)
+    if patch:
+        calls.clear()
+        with pytest.raises(ConnectionRefusedError):
+            b.address_node("peer", "node")
+        assert calls == [None]
+
+
+def test_survivor_preflight_and_readbacks_allow_delayed_reads(cluster, monkeypatch):
+    c, coordinators = cluster
+    delayed = []
+    original = Backend.address_node
+    counters = {}
+
+    def read(self, host, name, patch=None, status=False):
+        key = (self.mid, host)
+        counters[key] = counters.get(key, 0) + 1
+        if patch is None and host[2] != self.mid and counters[key] == 1:
+            delayed.append(key)
+            raise S.ReadUnavailable("survivor API warming up")
+        return original(self, host, name, patch, status)
+
+    monkeypatch.setattr(Backend, "address_node", read)
+
+    def run(coordinator):
+        assert coordinator.pre_start(99) == "normal-start-authorized"
+        coordinator.b.normal()
+        coordinator.post_start()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(run, coordinators))
+    assert len(delayed) == 6
+    assert len(c.patches) == 6
+    assert all(x.record["phase"] == "normal" for x in coordinators)
+
+
+@pytest.mark.parametrize("failure", ["delay", "identity", "unexpected", "never", "intent"])
+def test_survivor_readback_retries_only_known_old_address(cluster, monkeypatch, failure):
+    c, (coordinator, *_) = cluster
+    r, b = coordinator.r, coordinator.b
+    ip, old = c.ips["1"], r.e["local_ipv4"]
+    Q.atomic_json(r.address_journal, dict(phase="status-confirmed", old_ip=old))
+    if failure == "intent":
+        Q.atomic_json(r.address_journal, dict(phase="status-intent", old_ip=old))
+    base = copy.deepcopy(c.nodes[r.local["hostname"].removesuffix(".local")])
+    base["metadata"]["annotations"]["k3s.io/internal-ip"] = ip
+    base["status"]["addresses"] = [{"type": "InternalIP", "address": ip}]
+    calls, sleeps = [], []
+
+    def read(host, name):
+        calls.append(host)
+        node = copy.deepcopy(base)
+        if failure == "identity":
+            node["metadata"]["uid"] = "wrong"
+        elif failure == "unexpected":
+            node["metadata"]["annotations"]["k3s.io/internal-ip"] = "10.1.1.1"
+        elif failure == "never" or (failure == "delay" and len(calls) == 1):
+            node["status"]["addresses"][0]["address"] = old
+        return node
+
+    monkeypatch.setattr(b, "address_node", read)
+    monkeypatch.setattr(S.time, "sleep", sleeps.append)
+    if failure == "delay":
+        r.address_readback(ip)
+        assert len(calls) == 3 and sleeps == [2]
+    else:
+        with pytest.raises(Q.Stop):
+            r.address_readback(ip)
+        assert len(calls) == (3 if failure == "never" else 0 if failure == "intent" else 1)
+
+
+def test_api_final_local_get_transient_is_pollable(cluster, monkeypatch):
+    c, (coordinator, *_) = cluster
+    r = coordinator.r
+    coordinator.record = dict(ip=c.ips["1"], old_ip=r.e["local_ipv4"])
+    node = c.nodes["pi1"]
+    monkeypatch.setattr(coordinator.b, "address_node", lambda *args: copy.deepcopy(node))
+
+    def transient(*args):
+        raise S.ReadUnavailable("last local GET delayed")
+
+    monkeypatch.setattr(r, "address_proof", transient)
+    assert coordinator.api() is False
+
+
+def test_native_local_convergence_with_lagging_survivor_needs_no_prior_journal(
+    cluster, monkeypatch
+):
+    c, (coordinator, *_) = cluster
+    r, b = coordinator.r, coordinator.b
+    ip, old = c.ips["1"], r.e["local_ipv4"]
+    node = copy.deepcopy(c.nodes["pi1"])
+    node["metadata"]["annotations"]["k3s.io/internal-ip"] = ip
+    node["status"]["addresses"][0]["address"] = ip
+    assert not r.address_journal.exists()
+    monkeypatch.setattr(r, "address_proof", lambda *args: (r.host, copy.deepcopy(node)))
+    calls = []
+
+    def read(host, name):
+        calls.append(host)
+        fresh = copy.deepcopy(node)
+        if len(calls) == 1:
+            fresh["status"]["addresses"][0]["address"] = old
+        return fresh
+
+    monkeypatch.setattr(b, "address_node", read)
+    monkeypatch.setattr(S.time, "sleep", lambda _: None)
+    r.prepare_node_address(ip, old)
+    assert len(calls) == 3
+    assert not hasattr(r, "readback_baseline")
+    assert json.loads(r.address_journal.read_text())["phase"] == "verified"
+    assert c.patches == []
+
+
+@pytest.mark.parametrize("journal", ["staged", "node"])
+def test_dangling_recovery_journal_symlinks_refuse(cluster, journal):
+    _, (coordinator, *_) = cluster
+    if journal == "staged":
+        coordinator.path.symlink_to(coordinator.path.parent / "missing")
+        with pytest.raises(Q.Stop, match="symlink staged"):
+            S.Coordinator(coordinator.r, coordinator.path)
+    else:
+        coordinator.r.address_journal.symlink_to(coordinator.path.parent / "missing")
+        with pytest.raises(Q.Stop, match="symlink Node"):
+            coordinator.r.address_readback("10.0.0.11")

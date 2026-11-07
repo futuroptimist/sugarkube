@@ -149,3 +149,14 @@ and Node identities, committed data markers, full workload and HTTPS convergence
 restart persistence, power interruption, unavailable peers, failed admission,
 residual-shim refusal and repeated completed address incidents. No production
 readiness or permission to deploy is implied by the offline results.
+
+
+### API startup and readback bounds
+
+Before Node writes, all three enrolled APIs must return the original Node identity.
+GET requests retry at most three times, with two-second pauses, only for connection
+loss/refusal, timeout or HTTP 503. TLS, other HTTP statuses, malformed responses and
+identity failures stop immediately. PATCH requests never retry; an uncertain write
+also disables subsequent automatic GET retries. Survivor readbacks may poll the
+known old address up to three times, but unexpected addresses or identities fail
+immediately. Exhausted bounds preserve the incident and handover lock for review.
