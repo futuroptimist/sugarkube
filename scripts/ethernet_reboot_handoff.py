@@ -178,10 +178,25 @@ class Handoff:
                 self.q.atomic_json(self.observation, dict(expected, monotonic=now))
             return "observing-running-address"
         self.b.stable_address(ip)
+        final_state = self.b.reboot_admission()
+        # Both snapshots independently passed strict admission. Automatic restart
+        # attempts may change only InvocationID while our nonblocking leases
+        # prevent their staged pre-start from proceeding to K3s.
+        automatic = all(
+            snapshot.get("SubState") == "auto-restart" for snapshot in (state, final_state)
+        )
+
+        def comparable(snapshot):
+            return {
+                key: value
+                for key, value in snapshot.items()
+                if not (automatic and key == "InvocationID")
+            }
+
         self.q.require(
             self.b.running_network(ip, baseline) == network
             and self.b.boot_id() == boot
-            and self.b.reboot_admission() == state,
+            and comparable(final_state) == comparable(state),
             "host changed during reboot proof",
         )
         if self.record:
@@ -205,7 +220,7 @@ class Handoff:
             origin_boot_id=boot,
             ip=ip,
             old_ip=baseline,
-            service=state,
+            service=final_state,
             network=network,
         )
         self.save("reboot-dispatch-intent")

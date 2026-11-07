@@ -632,3 +632,124 @@ def test_new_boot_requires_refreshed_current_network_yaml(fleet, tmp_path, monke
     )
     handoff.before_start()
     assert handoff.record["phase"] == "cold-authorized"
+
+
+@pytest.mark.parametrize(
+    "change", ["turnover", "running", "failed", "queued", "start-pre", "config", "from-running"]
+)
+def test_auto_restart_turnover_binds_final_snapshot(fleet, monkeypatch, change):
+    _, _, (handoff, *_), now = fleet
+    b = handoff.b
+    b.service = dict(
+        ActiveState="activating",
+        SubState="auto-restart",
+        MainPID="0",
+        ControlPID="0",
+        Job="",
+        Restart="always",
+        InvocationID="a" * 32,
+    )
+    if change == "from-running":
+        b.service.update(ActiveState="active", SubState="running", MainPID="10")
+    assert handoff.watch() == "observing-running-address"
+    now[0] = 31
+
+    def sample(ip):
+        b.service["InvocationID"] = "b" * 32
+        if change in ("queued", "start-pre"):
+            b.service["SubState"] = "auto-restart-queued" if change == "queued" else change
+        elif change == "running":
+            b.service.update(ActiveState="active", SubState="running", MainPID="10")
+        elif change == "failed":
+            b.service.update(ActiveState="failed", SubState="failed")
+        elif change == "from-running":
+            b.service.update(ActiveState="activating", SubState="auto-restart", MainPID="0")
+        elif change == "config":
+            b.service["Restart"] = "no"
+
+    monkeypatch.setattr(b, "stable_address", sample)
+    if change == "turnover":
+        assert handoff.watch().startswith("reboot-request-accepted")
+        assert handoff.record["service"] == b.service
+        assert handoff.record["service"]["InvocationID"] == "b" * 32
+        with pytest.raises(Q.Stop, match="original boot"):
+            handoff.before_start()
+        with pytest.raises(Q.Stop, match="latched"):
+            handoff.watch()
+        assert b.requests == ["reboot"]
+    else:
+        with pytest.raises(Q.Stop, match="host changed"):
+            handoff.watch()
+        assert b.requests == [] and not handoff.path.exists()
+
+
+@pytest.mark.parametrize(
+    "tamper", ["", "restart", "main", "control", "job", "queued", "start-pre", "running"]
+)
+def test_exact_auto_restart_adapter(monkeypatch, tamper):
+    b = S.Backend({}, {})
+    state = dict(
+        ActiveState="activating",
+        SubState="auto-restart",
+        Restart="always",
+        MainPID="0",
+        ControlPID="0",
+        Job="",
+        InvocationID="a" * 32,
+        NeedDaemonReload="no",
+        KillMode="process",
+        Delegate="yes",
+    )
+    changes = {
+        "restart": ("Restart", "no"),
+        "main": ("MainPID", "10"),
+        "control": ("ControlPID", "10"),
+        "job": ("Job", "17"),
+        "queued": ("SubState", "auto-restart-queued"),
+        "start-pre": ("SubState", "start-pre"),
+        "running": ("SubState", "running"),
+    }
+    if tamper:
+        key, value = changes[tamper]
+        state[key] = value
+
+    def command(argv):
+        if "--version" in argv:
+            return "systemd 255 (255.4)"
+        if "list-jobs" in argv:
+            return ""
+        assert "Restart" in argv[-1]
+        return "\n".join(k + "=" + v for k, v in state.items())
+
+    monkeypatch.setattr(b, "command", command)
+    if tamper:
+        with pytest.raises(Q.Stop):
+            b.reboot_admission()
+    else:
+        assert b.reboot_admission() == state
+
+
+def test_prestart_nonblocking_lease_then_durable_same_boot_fence(fleet, monkeypatch):
+    _, coordinators, handoffs, now = fleet
+    coordinator, handoff = coordinators[0], handoffs[0]
+    b, r = coordinator.b, coordinator.r
+    b.child = None
+    monkeypatch.setattr(S.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(S, "STATE", r.path.parent)
+    monkeypatch.setattr(S, "load_opt_in", lambda: (r.e, {}))
+    monkeypatch.setattr(Q, "private_state", lambda _: None)
+    monkeypatch.setattr(S, "Backend", lambda *args: b)
+    monkeypatch.setattr(S, "Recovery", lambda *args: r)
+    monkeypatch.setattr(b, "service_context", lambda: None, raising=False)
+    monkeypatch.setattr(b, "close", lambda: None, raising=False)
+    monkeypatch.setattr(S.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(S, "reboot_handoff", lambda *args: handoff)
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", "pre-start"])
+    for name in ("lock", "bootstrap.lock"):
+        with (r.path.parent / name).open("a") as held:
+            S.fcntl.flock(held.fileno(), S.fcntl.LOCK_EX | S.fcntl.LOCK_NB)
+            assert S.main() == 2
+        assert not b.boot and b.requests == []
+    request_all([handoff], now)
+    assert S.main() == 2
+    assert not b.boot and b.requests == ["reboot"]

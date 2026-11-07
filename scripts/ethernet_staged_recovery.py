@@ -327,7 +327,7 @@ class Backend(Q.Backend):
                     "show",
                     "k3s.service",
                     "--property=ActiveState,SubState,MainPID,ControlPID,Job,InvocationID,"
-                    "NeedDaemonReload,KillMode,Delegate",
+                    "NeedDaemonReload,KillMode,Delegate,Restart",
                 ]
             ).splitlines()
         )
@@ -364,9 +364,10 @@ class Backend(Q.Backend):
         else:
             Q.require(
                 (state["ActiveState"], state["SubState"])
-                in (("inactive", "dead"), ("failed", "failed"))
-                and state["MainPID"] == "0",
-                "only stable running or stopped original service may request reboot",
+                in (("inactive", "dead"), ("failed", "failed"), ("activating", "auto-restart"))
+                and state["MainPID"] == "0"
+                and (state["SubState"] != "auto-restart" or state["Restart"] == "always"),
+                "only running, stopped or idle automatic restart may request reboot",
             )
         return state
 

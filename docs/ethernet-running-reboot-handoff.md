@@ -25,11 +25,28 @@ request dispatch nor a changed boot ID means cluster recovery succeeded.
 
 A failed or inactive original K3s service can qualify too, with MainPID and
 ControlPID zero and no pending service job. That covers address-loss failures that
-already stopped K3s but left shims behind. Activating, stopping, restarting, unknown
-service states and unrelated systemd jobs refuse admission. A stock
-`Restart=always` auto-restart loop remains unsupported while it is activating;
-this mode does not cancel or race an in-progress restart. A running service must
-have the pinned internal K3s executable and a valid current invocation.
+already stopped K3s but left shims behind. The exact systemd 255
+activating/auto-restart waiting state also qualifies with `Restart=always`,
+both PIDs zero and no service job. Queued restarts, start-pre, other activating
+states, stopping and unrelated jobs still refuse admission. No stop or job
+cancellation is issued.
+
+Both service snapshots must independently qualify. Only two automatic-restart
+snapshots may differ in InvocationID; all other fields must match, and the final
+snapshot is recorded. Address sampling remains unchanged. The controller holds
+both nonblocking local locks: a concurrent staged pre-start fails before starting
+K3s. Earlier network/resolver pre-start hooks can still run; the locks fence
+staged bootstrap and normal ExecStart, not those earlier hook effects. After dispatch intent is saved, the same-boot fence continues to refuse
+startup even if the reboot request fails. A transition before final admission
+refuses safely; there is no guarantee that a timer catches an eligible window.
+A running service must have the pinned internal K3s executable and a valid current
+invocation.
+
+Systemd 255 [service state handling][service-state] maps automatic restart waiting
+to activating and clears main/control PID ownership. Its timer subsequently
+queues a start job and enters the distinct auto-restart-queued state.
+
+[service-state]: https://github.com/systemd/systemd/blob/v255/src/core/service.c
 
 ## Why reboot instead of container adoption or freezing
 
