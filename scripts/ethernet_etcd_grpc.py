@@ -34,6 +34,10 @@ class TransportError(RuntimeError):
     """This session cannot be reused; a mutation outcome may be unknown."""
 
 
+class Unavailable(TransportError):
+    """Known transport loss, not an authentication or response-identity failure."""
+
+
 class OneConnection:
     """Private, single-accept encrypted-byte relay, with no retrying dial path."""
 
@@ -43,6 +47,7 @@ class OneConnection:
         self.guard = threading.Lock()
         self.accepts = 0
         self.connects = 0
+        self.connect_error = None
         self.directory = tempfile.TemporaryDirectory(prefix="sugarkube-grpc-")
         self.path = str(Path(self.directory.name) / "socket")
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -73,7 +78,12 @@ class OneConnection:
             self.listener.close()
             local = self.register(local)
             # No loop around this call, including on initial connection failure.
-            remote = self.register(connect())
+            try:
+                remote_socket = connect()
+            except (ConnectionError, TimeoutError) as exc:
+                self.connect_error = exc
+                raise
+            remote = self.register(remote_socket)
             self.connects += 1
             while not self.closed.is_set():
                 readable, _, _ = select.select([local, remote], [], [], 0.1)
@@ -145,13 +155,18 @@ class Session:
             self.failed = False
         except Exception as exc:
             self.close()
+            if self.relay is not None and self.relay.connect_error is not None:
+                raise Unavailable("TCP connection temporarily unavailable") from exc
             raise TransportError(
                 "authenticated gRPC connection failed; no automatic reconnect"
             ) from exc
 
     def request(self, route, payload):
-        if self.failed or self.relay.closed.is_set():
+        if self.failed:
             raise TransportError("authenticated session ended; no automatic reconnect")
+        if self.relay.closed.is_set():
+            self.close()
+            raise Unavailable("authenticated connection ended; no automatic reconnect")
         try:
             method = self.pool.FindMethodByName("etcdserverpb." + ROUTES[route])
             request = message_class(method.input_type, self.pool)()
@@ -177,6 +192,11 @@ class Session:
             self.close()
             if isinstance(exc, TransportError):
                 raise
+            if isinstance(exc, grpc.RpcError) and exc.code() in (
+                grpc.StatusCode.UNAVAILABLE,
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+            ):
+                raise Unavailable("authenticated RPC temporarily unavailable") from exc
             raise TransportError("gRPC operation failed; outcome may be unknown") from exc
 
     def close(self):

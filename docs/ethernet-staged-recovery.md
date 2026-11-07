@@ -160,3 +160,11 @@ identity failures stop immediately. PATCH requests never retry; an uncertain wri
 also disables subsequent automatic GET retries. Survivor readbacks may poll the
 known old address up to three times, but unexpected addresses or identities fail
 immediately. Exhausted bounds preserve the incident and handover lock for review.
+
+During API preflight, an original member may briefly stop its bootstrap process
+for normal-agent handover. Only typed etcd availability failures on read-only
+status, member-list and range requests may reopen read sessions within the existing
+startup deadline. The native transport distinguishes TCP connection failure,
+previously authenticated connection loss and authenticated RPC availability errors
+from TLS, identity, permission and malformed-response failures. Mutation requests
+never reconnect or replay, and an uncertain-write latch prevents read retries.

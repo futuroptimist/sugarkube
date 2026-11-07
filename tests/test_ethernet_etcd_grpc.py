@@ -319,3 +319,140 @@ def test_schema_tamper_and_legacy_protobuf_factory_are_checked(monkeypatch):
     )
     assert TRANSPORT.message_class("descriptor", "pool") == "legacy-message"
     assert calls == [("pool", "descriptor")]
+
+
+@pytest.mark.parametrize("failure", ["connect", "timeout", "permission", "forward"])
+def test_offline_relay_marks_only_tcp_connect_failures(monkeypatch, failure):
+    import threading
+    from types import SimpleNamespace
+
+    relay = TRANSPORT.OneConnection.__new__(TRANSPORT.OneConnection)
+    relay.closed = threading.Event()
+    relay.accepts = relay.connects = 0
+    relay.connect_error = None
+    calls = []
+    local = SimpleNamespace(recv=lambda _: (_ for _ in ()).throw(ConnectionResetError()))
+    relay.listener = SimpleNamespace(accept=lambda: (local, None), close=lambda: None)
+    relay.register = lambda sock: sock
+    relay.close = relay.closed.set
+    monkeypatch.setattr(TRANSPORT.select, "select", lambda *args: ([local], [], []))
+
+    def connect():
+        calls.append(True)
+        if failure == "connect":
+            raise ConnectionRefusedError()
+        if failure == "timeout":
+            raise TimeoutError()
+        if failure == "permission":
+            raise PermissionError()
+        return object()
+
+    relay.run(connect)
+    assert calls == [True] and relay.closed.is_set()
+    assert (relay.connect_error is not None) is (failure in ("connect", "timeout"))
+    assert relay.connects == (1 if failure == "forward" else 0)
+
+
+@pytest.mark.parametrize("failure", ["tcp", "tls", "permission", "success"])
+def test_offline_session_handshake_classification(monkeypatch, tmp_path, failure):
+    import threading
+    from types import SimpleNamespace
+
+    cert = tmp_path / "synthetic-credential"
+    cert.write_bytes(b"offline fixture")
+    closed = []
+    relay = SimpleNamespace(
+        path="unused",
+        connect_error=ConnectionRefusedError() if failure == "tcp" else None,
+        closed=threading.Event(),
+        close=lambda: closed.append("relay"),
+    )
+    channel = SimpleNamespace(close=lambda: closed.append("channel"))
+    monkeypatch.setattr(TRANSPORT, "OneConnection", lambda _: relay)
+    monkeypatch.setattr(grpc, "ssl_channel_credentials", lambda **kwargs: object())
+    monkeypatch.setattr(grpc, "secure_channel", lambda *args, **kwargs: channel)
+
+    def ready(timeout):
+        assert timeout == TRANSPORT.DEADLINE
+        if failure == "permission":
+            raise PermissionError()
+        if failure != "success":
+            raise grpc.FutureTimeoutError()
+
+    monkeypatch.setattr(grpc, "channel_ready_future", lambda _: SimpleNamespace(result=ready))
+    tls = {name: str(cert) for name in ("ca", "key", "cert")}
+    if failure == "success":
+        session = TRANSPORT.Session("pi1.local", CID, MID, tls, lambda: None)
+        assert session.failed is False
+        session.close()
+    else:
+        with pytest.raises(TRANSPORT.TransportError) as caught:
+            TRANSPORT.Session("pi1.local", CID, MID, tls, lambda: None)
+        assert isinstance(caught.value, TRANSPORT.Unavailable) is (failure == "tcp")
+    assert closed == ["channel", "relay"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "unavailable",
+        "deadline",
+        "permission",
+        "unauthenticated",
+        "identity",
+        "schema",
+        "eof",
+        "failed",
+    ],
+)
+def test_offline_authenticated_rpc_classification_never_replays(failure):
+    import threading
+    from types import SimpleNamespace
+
+    session = TRANSPORT.Session.__new__(TRANSPORT.Session)
+    session.failed = failure == "failed"
+    session.cluster_id, session.member_id = CID, MID
+    session.pool = descriptor_pool.DescriptorPool()
+    descriptors = descriptor_pb2.FileDescriptorSet.FromString(
+        (ROOT / "scripts/ethernet-etcd.desc").read_bytes()
+    )
+    for descriptor in descriptors.file:
+        session.pool.Add(descriptor)
+    closed, calls = [], []
+    session.relay = SimpleNamespace(closed=threading.Event(), close=lambda: closed.append("relay"))
+    if failure == "eof":
+        session.relay.closed.set()
+
+    class RpcFailure(grpc.RpcError):
+        def code(self):
+            return {
+                "unavailable": grpc.StatusCode.UNAVAILABLE,
+                "deadline": grpc.StatusCode.DEADLINE_EXCEEDED,
+                "permission": grpc.StatusCode.PERMISSION_DENIED,
+                "unauthenticated": grpc.StatusCode.UNAUTHENTICATED,
+            }[failure]
+
+    def rpc(request, **kwargs):
+        calls.append(request)
+        if failure == "identity":
+            descriptor = session.pool.FindMessageTypeByName("etcdserverpb.StatusResponse")
+            response = TRANSPORT.message_class(descriptor, session.pool)()
+            response.header.cluster_id, response.header.member_id = CID, MID - 1
+            return response
+        raise RpcFailure()
+
+    session.channel = SimpleNamespace(
+        unary_unary=lambda *args, **kwargs: rpc, close=lambda: closed.append("channel")
+    )
+    route = "unknown" if failure == "schema" else "/v3/maintenance/status"
+    with pytest.raises(TRANSPORT.TransportError) as caught:
+        session.request(route, {})
+    assert isinstance(caught.value, TRANSPORT.Unavailable) is (
+        failure in ("unavailable", "deadline", "eof")
+    )
+    expected = 0 if failure in ("eof", "failed", "schema") else 1
+    assert len(calls) == expected and session.failed
+    with pytest.raises(TRANSPORT.TransportError) as repeated:
+        session.request(route, {})
+    assert not isinstance(repeated.value, TRANSPORT.Unavailable)
+    assert len(calls) == expected

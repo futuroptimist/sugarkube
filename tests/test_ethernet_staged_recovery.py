@@ -915,3 +915,133 @@ def test_dangling_recovery_journal_symlinks_refuse(cluster, journal):
         coordinator.r.address_journal.symlink_to(coordinator.path.parent / "missing")
         with pytest.raises(Q.Stop, match="symlink Node"):
             coordinator.r.address_readback("10.0.0.11")
+
+
+def test_staged_native_session_retains_typed_transport(monkeypatch):
+    b = S.Backend({"cluster_id": "100", "etcd_tls": {"ca": "pinned"}}, {})
+    calls, modules = [], []
+    transport = SimpleNamespace(Session=lambda *args: calls.append(args) or object())
+    monkeypatch.setattr(Q, "sibling", lambda name: modules.append(name) or transport)
+    monkeypatch.setattr(b, "connect_peer", lambda address: "bound-" + address)
+    for _ in range(2):
+        b.open_session("pi1.local", "10.0.0.11", {"id": "1"})
+    assert modules == ["ethernet_etcd_grpc"]
+    assert calls[0][:4] == ("pi1.local", "100", "1", {"ca": "pinned"})
+    assert calls[0][4]() == "bound-10.0.0.11"
+
+
+@pytest.mark.parametrize(
+    "route,read",
+    [
+        ("/v3/maintenance/status", True),
+        ("/v3/cluster/member/list", True),
+        ("/v3/kv/range", True),
+        ("/v3/kv/txn", False),
+        ("/v3/cluster/member/update", False),
+        ("unknown", False),
+    ],
+)
+@pytest.mark.parametrize("failure", ["availability", "identity", "tls", "latched"])
+def test_etcd_retry_type_is_read_only_and_cannot_clear_write_latch(
+    monkeypatch, route, read, failure
+):
+    transport = Q.sibling("ethernet_etcd_grpc")
+    b = S.Backend({}, {})
+    b.transport = transport
+    b.write_failed = failure == "latched"
+    cause = (
+        transport.Unavailable("known connection loss")
+        if failure in ("availability", "latched")
+        else transport.TransportError(failure)
+    )
+    calls = []
+
+    def fail(*args):
+        calls.append(args)
+        raise Q.Stop("authenticated gRPC failed") from cause
+
+    monkeypatch.setattr(Q.Backend, "request", fail)
+    with pytest.raises(Q.Stop) as caught:
+        b.request("pi1.local", route, {})
+    assert isinstance(caught.value, S.ReadUnavailable) is (read and failure == "availability")
+    assert len(calls) == 1  # Classification never replays the operation.
+    if failure == "latched" or route in ("/v3/kv/txn", "/v3/cluster/member/update"):
+        assert b.write_failed
+        with pytest.raises(Q.Stop, match="uncertain mutation"):
+            b.retry_reads()
+
+
+def test_peer_handover_etcd_gap_during_api_preflight_does_not_latch(cluster, monkeypatch):
+    c, coordinators = cluster
+    stopped, observed = threading.Event(), threading.Event()
+    original_stop, original_etcd = Backend.stop, Backend.etcd
+    original_proof = S.Recovery.address_proof
+    delayed = []
+
+    def stop(self):
+        original_stop(self)
+        if self.mid == "1":
+            stopped.set()
+            assert observed.wait(5), "other voter never reached the paused endpoint"
+
+    def etcd(self, host, *args, **kwargs):
+        with self.c.mutex:
+            if host[2] not in self.c.active:
+                raise S.ReadUnavailable("known read-only connection loss")
+            return original_etcd(self, host, *args, **kwargs)
+
+    def proof(self, ip, old):
+        if self.local["id"] == "2" and not delayed:
+            delayed.append(True)
+            assert stopped.wait(5), "first handover never stopped its child"
+            try:
+                return original_proof(self, ip, old)
+            except S.ReadUnavailable:
+                observed.set()
+                raise
+        return original_proof(self, ip, old)
+
+    monkeypatch.setattr(Backend, "stop", stop)
+    monkeypatch.setattr(Backend, "etcd", etcd)
+    monkeypatch.setattr(S.Recovery, "address_proof", proof)
+
+    def run(coordinator):
+        assert coordinator.pre_start(99) == "normal-start-authorized"
+        coordinator.b.normal()
+        coordinator.post_start()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(run, coordinators))
+    assert observed.is_set()
+    assert c.owner is None and sorted(c.updates) == ["1", "2", "3"]
+    assert len(c.patches) == 6
+    assert all(x.record["phase"] == "normal" for x in coordinators)
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "identity", "malformed"])
+def test_api_etcd_poll_is_bounded_and_does_not_swallow_proof_failures(
+    cluster, monkeypatch, failure
+):
+    c, (coordinator, *_) = cluster
+    c.active.update(("1", "2", "3"))
+    for member in c.members.values():
+        member["peerURLs"][0] = f"https://{c.ips[str(member['ID'])]}:2380"
+    coordinator.b.boot = True
+    coordinator.record = dict(ip="10.0.0.11", old_ip="10.0.0.1")
+    attempts, reconnects = [], []
+
+    def proof(*args):
+        attempts.append(True)
+        if failure == "unavailable":
+            raise S.ReadUnavailable("known read-only failure")
+        raise Q.Stop(failure)
+
+    monkeypatch.setattr(coordinator.r, "address_proof", proof)
+    monkeypatch.setattr(coordinator.b, "retry_reads", lambda: reconnects.append(True))
+    coordinator.clock = lambda: len(attempts) * 2
+    coordinator.sleep = lambda _: None
+    with pytest.raises(Q.Stop, match="deadline" if failure == "unavailable" else failure):
+        coordinator.wait(coordinator.api, 3)
+    assert len(attempts) == (2 if failure == "unavailable" else 1)
+    assert len(reconnects) == (2 if failure == "unavailable" else 0)
+    assert c.patches == [] and c.updates == []

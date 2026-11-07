@@ -92,7 +92,7 @@ def reboot_handoff(recovery, backend, opt_in):
 
 
 class ReadUnavailable(Q.Stop):
-    """Bounded GET transport retries exhausted; no mutation was repeated."""
+    """Read-only transport unavailable; no mutation was repeated."""
 
 
 class Backend(Q.Backend):
@@ -101,13 +101,34 @@ class Backend(Q.Backend):
         self.opt_in = opt_in
         self.child = None
         self.write_failed = False
+        self.transport = None
+
+    def open_session(self, host, address, expected):
+        # Keep the trusted module's exception identity with its sessions. The
+        # original controller still owns the pinned, single-attempt connection.
+        if self.transport is None:
+            self.transport = Q.sibling("ethernet_etcd_grpc")
+        return self.transport.Session(
+            host,
+            self.e["cluster_id"],
+            expected["id"],
+            self.e["etcd_tls"],
+            lambda: self.connect_peer(address),
+        )
 
     def request(self, host, route, payload):
         try:
             return super().request(host, route, payload)
-        except Q.Stop:
+        except Q.Stop as exc:
             if route in ("/v3/kv/txn", "/v3/cluster/member/update"):
                 self.write_failed = True
+            if (
+                not self.write_failed
+                and route in ("/v3/maintenance/status", "/v3/cluster/member/list", "/v3/kv/range")
+                and self.transport is not None
+                and isinstance(exc.__cause__, self.transport.Unavailable)
+            ):
+                raise ReadUnavailable("etcd read temporarily unavailable") from exc
             raise
 
     def address_node(self, host, node_name, patch=None, status=False):
@@ -639,6 +660,7 @@ class Coordinator:
         try:
             self.r.address_proof(self.record["ip"], self.record["old_ip"])
         except ReadUnavailable:
+            self.b.retry_reads()
             return False
         return True
 
