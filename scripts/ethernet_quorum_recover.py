@@ -2125,7 +2125,10 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
         with path.open("rb") as handle:
             raw = handle.read(max_bytes + 1)
         require(len(raw) <= max_bytes, "migration record too large")
-        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=finite)
+        try:
+            value = json.loads(raw, object_pairs_hook=pairs, parse_constant=finite)
+        except (ValueError, RecursionError) as exc:
+            raise Stop("invalid migration record JSON") from exc
         require(type(value) is dict, "invalid migration record")
         return value
 

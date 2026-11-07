@@ -270,3 +270,26 @@ def test_active_migration_still_binds_exact_enrollment_bytes(case):
     M.atomic_json(case[0], json.loads(case[0].read_bytes()))
     with pytest.raises(M.Stop, match="migration baseline changed"):
         run(case)
+
+
+@pytest.mark.parametrize("artifact", ["intent", "complete", "enrollment"])
+@pytest.mark.parametrize("raw", [b"{", b"\xff"])
+def test_malformed_record_is_always_a_guard_stop(case, artifact, raw):
+    path, _, state, permit = case
+    if artifact == "intent":
+        target = state / "migration-intent.json"
+    else:
+        (state / "migration-complete.json").write_text(json.dumps(permit))
+        target = state / "migration-complete.json" if artifact == "complete" else path
+    target.write_bytes(raw)
+    with pytest.raises(M.Stop, match="invalid migration record JSON"):
+        run(case, "watch")
+
+
+def test_guard_parser_recursion_failure_is_normalized(case, monkeypatch):
+    def exhausted(*args, **kwargs):
+        raise RecursionError("decoder nesting limit")
+
+    monkeypatch.setattr(M.json, "loads", exhausted)
+    with pytest.raises(M.Stop, match="invalid migration record JSON"):
+        run(case, "watch")
