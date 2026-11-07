@@ -2107,10 +2107,10 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
     if not intent_path.exists() and not intent_path.is_symlink():
         return None
 
-    def read_record(path):
+    def read_record(path, max_bytes=65536):
         trusted_file(path)
         require(stat.S_ISREG(path.lstat().st_mode), "migration record is not regular")
-        require(path.stat().st_size <= 65536, "migration record too large")
+        require(path.stat().st_size <= max_bytes, "migration record too large")
 
         def pairs(items):
             result = {}
@@ -2119,7 +2119,13 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
                 result[key] = value
             return result
 
-        value = json.loads(path.read_bytes(), object_pairs_hook=pairs)
+        def finite(_):
+            raise Stop("nonfinite migration JSON number")
+
+        with path.open("rb") as handle:
+            raw = handle.read(max_bytes + 1)
+        require(len(raw) <= max_bytes, "migration record too large")
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=finite)
         require(type(value) is dict, "invalid migration record")
         return value
 
@@ -2144,9 +2150,15 @@ def migration_start_guard(enrollment_path, backend, state_dir, phase):
     complete = state_dir / "migration-complete.json"
     if complete.exists() or complete.is_symlink():
         require(read_record(complete) == expected, "migration completion mismatch")
-        trusted_file(enrollment_path)
+        # The committed target uses canonical JSON. Normal arm writes may
+        # change JSON whitespace without changing any enrolled fact. Preserve
+        # the full content commitment while refusing duplicate/nonfinite JSON.
+        enrollment = read_record(enrollment_path, max_bytes=8 * 1024 * 1024)
+        canonical = json.dumps(
+            enrollment, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
         require(
-            digest(enrollment_path.read_bytes()) == expected["target_enrollment_sha256"],
+            digest(canonical) == expected["target_enrollment_sha256"],
             "completed migration enrollment changed",
         )
         return None

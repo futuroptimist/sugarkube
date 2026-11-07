@@ -40,13 +40,15 @@ def case(tmp_path, monkeypatch):
     monkeypatch.setenv("INVOCATION_ID", "a" * 32)
     monkeypatch.setattr(M, "migration_service_context", lambda b, p: checked_invocation())
     e = {
+        "schema_version": 2,
+        "armed": True,
         "cluster_id": "1",
         "local_member_id": "2",
         "local_ipv4": "192.0.2.1",
         "members": [{"id": "2", "hostname": "one.local"}, {"id": "3", "hostname": "two.local"}],
     }
     enrollment = tmp_path / "enrollment.json"
-    enrollment.write_text(json.dumps(e))
+    enrollment.write_text(json.dumps(e, sort_keys=True, separators=(",", ":")))
     incident = tmp_path / "incident.json"
     incident.write_text(json.dumps({"phase": "complete", "kind": "enrollment"}))
     owner = {"operation_id": "a" * 64, "plan_sha256": "b" * 64}
@@ -195,3 +197,76 @@ def test_main_routes_through_guard_before_controller_action(case, monkeypatch, p
         "sys.argv", ["controller", phase, "--enrollment", str(case[0]), "--state-dir", str(case[2])]
     )
     assert M.main() == (0 if phase == "pre-start" else 2)
+
+
+@pytest.mark.parametrize("phase", ["watch", "pre-start", "resume"])
+def test_completed_migration_allows_arm_json_reformatting(case, monkeypatch, phase):
+    from types import SimpleNamespace
+
+    path, backend, state, permit = case
+    (state / "migration-complete.json").write_text(json.dumps(permit))
+    original = path.read_bytes()
+    backend.close = lambda: None
+    monkeypatch.setattr(M, "Backend", lambda e: backend)
+    monkeypatch.setattr(M.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(M, "private_state", lambda p: None)
+    actions = {
+        name: (lambda: "unchanged")
+        for name in (
+            "pre_start",
+            "post_start",
+            "watch",
+            "resume",
+            "enroll_peer",
+            "resume_transport",
+            "resume_node_address",
+        )
+    }
+    actions["arm"] = lambda: "armed"
+    monkeypatch.setattr(M, "DualRecovery", lambda *args: SimpleNamespace(**actions))
+    monkeypatch.setattr(
+        "sys.argv", ["controller", "arm", "--enrollment", str(path), "--state-dir", str(state)]
+    )
+    assert M.main() == 0
+    assert path.read_bytes() != original
+    assert json.loads(path.read_bytes()) == json.loads(original)
+    assert run(case, phase) is None
+
+
+@pytest.mark.parametrize("change", ["armed", "address", "unknown", "type"])
+def test_completed_guard_still_rejects_enrollment_content_change(case, change):
+    path, backend, state, permit = case
+    (state / "migration-complete.json").write_text(json.dumps(permit))
+    e = json.loads(path.read_bytes())
+    if change == "armed":
+        e["armed"] = False
+    elif change == "address":
+        e["local_ipv4"] = "192.0.2.9"
+    elif change == "unknown":
+        e["unexpected"] = "field"
+    else:
+        e["schema_version"] = 2.0
+    path.write_text(json.dumps(e, indent=2))
+    with pytest.raises(M.Stop, match="completed migration enrollment changed"):
+        run(case, "watch")
+
+
+@pytest.mark.parametrize(
+    "raw,diagnostic",
+    [
+        ('{"armed":true,"armed":true}', "duplicate"),
+        ('{"unexpected":NaN}', "nonfinite"),
+        ("[]", "invalid migration record"),
+    ],
+)
+def test_completed_guard_refuses_ambiguous_json(case, raw, diagnostic):
+    (case[2] / "migration-complete.json").write_text(json.dumps(case[3]))
+    case[0].write_text(raw)
+    with pytest.raises(M.Stop, match=diagnostic):
+        run(case, "watch")
+
+
+def test_active_migration_still_binds_exact_enrollment_bytes(case):
+    M.atomic_json(case[0], json.loads(case[0].read_bytes()))
+    with pytest.raises(M.Stop, match="migration baseline changed"):
+        run(case)
