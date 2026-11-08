@@ -1419,3 +1419,68 @@ def test_changed_503_exception_text_is_not_a_retry_contract(monkeypatch):
         b.address_node("pi1.local", "pi1")
     assert not isinstance(caught.value, S.ReadUnavailable)
     assert calls == [True] and not b.write_failed
+
+
+@pytest.mark.parametrize(
+    "kind", ["absent", "valid", "uid", "mode", "directory", "fifo", "live", "dangling"]
+)
+def test_constructor_admits_trusted_regular_leaf_before_read(tmp_path, monkeypatch, kind):
+    import os
+    import stat
+
+    path = tmp_path / "staged.json"
+    record = dict(member_id="1", cluster_id="100", phase="normal", **{"token": "a" * 32})
+    if kind in ("valid", "uid", "mode"):
+        path.write_text(json.dumps(record))
+    elif kind == "directory":
+        path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(path)
+    elif kind in ("live", "dangling"):
+        target = tmp_path / "target"
+        if kind == "live":
+            target.write_text(json.dumps(record))
+        path.symlink_to(target)
+    original_lstat, original_read, original_trust = Path.lstat, Path.read_text, Q.trusted_file
+    calls = []
+
+    def metadata(candidate, *args, **kwargs):
+        # Exercise real admission logic, with installed root-owned ancestor
+        # metadata simulated rather than changing pytest's /tmp permissions.
+        if candidate in path.parents:
+            return SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o700)
+        if candidate == path and kind in ("valid", "uid", "mode"):
+            return SimpleNamespace(
+                st_uid=1000 if kind == "uid" else 0,
+                st_mode=stat.S_IFREG | (0o666 if kind == "mode" else 0o600),
+            )
+        return original_lstat(candidate, *args, **kwargs)
+
+    def trust(candidate):
+        calls.append("trust")
+        original_trust(candidate)
+        calls.append("admitted")
+
+    def read(candidate, *args, **kwargs):
+        if candidate == path:
+            assert calls == ["trust", "admitted"], "JSON read preceded trusted admission"
+            calls.append("read")
+        return original_read(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Q, "trusted_file", trust)
+    recovery = SimpleNamespace(b=object(), local={"id": "1"}, e={"cluster_id": "100"})
+    if kind in ("absent", "valid"):
+        coordinator = S.Coordinator(recovery, path)
+        assert coordinator.record == (record if kind == "valid" else None)
+        assert calls == (["trust", "admitted", "read"] if kind == "valid" else [])
+    else:
+        message = (
+            "untrusted enrollment"
+            if kind in ("uid", "mode")
+            else "symlink staged" if kind in ("live", "dangling") else "nonregular state evidence"
+        )
+        with pytest.raises(Q.Stop, match=message):
+            S.Coordinator(recovery, path)
+        assert calls == (["trust"] if kind in ("uid", "mode") else [])

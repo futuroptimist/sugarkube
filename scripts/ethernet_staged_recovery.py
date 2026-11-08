@@ -614,7 +614,7 @@ class Coordinator:
         self.clock, self.sleep = clock, sleep
         self.handoff = None
         Q.require(not path.is_symlink(), "symlink staged journal unsupported")
-        self.record = json.loads(path.read_text()) if path.exists() else None
+        self.record = json.loads(path.read_text()) if state_evidence(path) else None
         if self.record:
             Q.require(re.fullmatch("[0-9a-f]{32}", self.record["token"]), "invalid staged token")
             Q.require(
