@@ -1570,3 +1570,38 @@ def test_poststart_address_readback_admits_leaf_before_read(cluster, monkeypatch
         controller.post_start()
     assert path.lstat() == before
     assert controller.record["phase"] == "normal-start-intent" and b.events == []
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {},
+        None,
+        [],
+        False,
+        0,
+        "",
+        True,
+        1,
+        -1,
+        1.5,
+        "record",
+        [1],
+        {"phase": "normal"},
+        {"phase": "normal", "token": 1},
+        {"phase": ""},
+        {"phase": False},
+    ],
+)
+def test_present_invalid_staged_record_cannot_start_or_replace(cluster, monkeypatch, record):
+    c, controllers = cluster
+    controller = controllers[0]
+    path = controller.path
+    path.write_text(json.dumps(record))
+    before = path.read_bytes()
+    monkeypatch.setattr(controller.b, "start", lambda *_: pytest.fail("must not start"))
+    monkeypatch.setattr(Q, "atomic_json", lambda *_: pytest.fail("must not replace evidence"))
+    with pytest.raises(Q.Stop, match="invalid staged"):
+        S.Coordinator(controller.r, path).pre_start(9)
+    assert path.read_bytes() == before
+    assert not controller.b.events and not c.patches

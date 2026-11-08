@@ -618,12 +618,23 @@ class Coordinator:
         self.clock, self.sleep = clock, sleep
         self.handoff = None
         Q.require(not path.is_symlink(), "symlink staged journal unsupported")
-        self.record = json.loads(path.read_text()) if state_evidence(path) else None
-        if self.record:
-            Q.require(re.fullmatch("[0-9a-f]{32}", self.record["token"]), "invalid staged token")
+        present = state_evidence(path)
+        self.record = json.loads(path.read_text()) if present else None
+        if present:
             Q.require(
-                self.record["member_id"] == recovery.local["id"]
-                and self.record["cluster_id"] == recovery.e["cluster_id"],
+                isinstance(self.record, dict)
+                and isinstance(self.record.get("phase"), str)
+                and bool(self.record["phase"]),
+                "invalid staged record",
+            )
+            Q.require(
+                isinstance(self.record.get("token"), str)
+                and re.fullmatch("[0-9a-f]{32}", self.record["token"]),
+                "invalid staged token",
+            )
+            Q.require(
+                self.record.get("member_id") == recovery.local["id"]
+                and self.record.get("cluster_id") == recovery.e["cluster_id"],
                 "staged identity changed",
             )
 
