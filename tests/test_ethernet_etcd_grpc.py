@@ -201,8 +201,9 @@ def test_wrong_authenticated_response_identity_latches(tls, endpoint, field):
 
 
 def test_wrong_tls_hostname_cannot_dispatch(tls, endpoint):
-    with pytest.raises(TRANSPORT.TransportError, match="connection failed"):
+    with pytest.raises(TRANSPORT.TransportError, match="connection failed") as caught:
         session(tls, endpoint, host="wrong.local")
+    assert not isinstance(caught.value, TRANSPORT.Unavailable)
     assert endpoint["calls"] == []
     assert endpoint["connects"] == 1
 
@@ -272,8 +273,9 @@ def test_missing_client_authentication_cannot_dispatch(tls, endpoint, tmp_path):
         check=True,
         timeout=15,
     )
-    with pytest.raises(TRANSPORT.TransportError, match="connection failed"):
+    with pytest.raises(TRANSPORT.TransportError, match="connection failed") as caught:
         session({**tls, "key": str(key), "cert": str(cert)}, endpoint)
+    assert not isinstance(caught.value, TRANSPORT.Unavailable)
     assert endpoint["calls"] == [] and endpoint["connects"] == 1
 
 
@@ -330,6 +332,9 @@ def test_offline_relay_marks_only_tcp_connect_failures(monkeypatch, failure):
     relay.closed = threading.Event()
     relay.accepts = relay.connects = 0
     relay.connect_error = None
+    relay.guard = threading.Lock()
+    relay.client_bytes = relay.server_bytes = 0
+    relay.relay_failed = False
     calls = []
     local = SimpleNamespace(recv=lambda _: (_ for _ in ()).throw(ConnectionResetError()))
     relay.listener = SimpleNamespace(accept=lambda: (local, None), close=lambda: None)
@@ -366,6 +371,7 @@ def test_offline_session_handshake_classification(monkeypatch, tmp_path, failure
         connect_error=ConnectionRefusedError() if failure == "tcp" else None,
         closed=threading.Event(),
         close=lambda: closed.append("relay"),
+        startup_pending=lambda: False,
     )
     channel = SimpleNamespace(close=lambda: closed.append("channel"))
     monkeypatch.setattr(TRANSPORT, "OneConnection", lambda _: relay)
@@ -472,3 +478,205 @@ def test_offline_authenticated_rpc_classification_never_replays(failure, route):
     assert not isinstance(repeated.value, TRANSPORT.Unavailable)
     assert "no automatic reconnect" in str(repeated.value)
     assert len(calls) == expected
+
+
+@pytest.mark.parametrize(
+    "state", ["silent", "server", "eof", "error", "closed", "unsent", "undialed", "permission"]
+)
+@pytest.mark.parametrize("latched", [False, True])
+@pytest.mark.parametrize("route", list(TRANSPORT.ROUTES))
+def test_real_session_startup_snapshot_through_staged_backend(
+    tmp_path, monkeypatch, state, route, latched
+):
+    import threading
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        "staged_bridge", ROOT / "scripts/ethernet_staged_recovery.py"
+    )
+    staged = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(staged)
+    cert = tmp_path / "synthetic"
+    cert.write_bytes(b"offline")
+    relay = TRANSPORT.OneConnection.__new__(TRANSPORT.OneConnection)
+    relay.guard = threading.Lock()
+    relay.closed = threading.Event()
+    relay.connects = 0 if state == "undialed" else 1
+    relay.client_bytes = 0 if state == "unsent" else 1
+    relay.server_bytes = 1 if state == "server" else 0
+    relay.relay_failed = state in ("eof", "error")
+    relay.connect_error = None
+    relay.path = "unused"
+    if state == "closed":
+        relay.closed.set()
+    closes = []
+
+    def close():
+        closes.append("relay")
+        relay.closed.set()
+
+    relay.close = close
+    channel = SimpleNamespace(close=lambda: closes.append("channel"))
+    dials = []
+    monkeypatch.setattr(TRANSPORT, "OneConnection", lambda connect: dials.append(True) or relay)
+    monkeypatch.setattr(grpc, "ssl_channel_credentials", lambda **kwargs: object())
+    monkeypatch.setattr(grpc, "secure_channel", lambda *args, **kwargs: channel)
+
+    def ready(timeout):
+        assert timeout == TRANSPORT.DEADLINE
+        if state == "permission":
+            raise PermissionError()
+        raise grpc.FutureTimeoutError()
+
+    monkeypatch.setattr(grpc, "channel_ready_future", lambda _: SimpleNamespace(result=ready))
+    b = staged.Backend(
+        {
+            "members": [{"hostname": "pi1.local", "id": str(MID)}],
+            "cluster_id": str(CID),
+            "etcd_tls": {k: str(cert) for k in ("ca", "key", "cert")},
+        },
+        {},
+    )
+    b.transport = TRANSPORT
+    b.write_failed = latched
+    monkeypatch.setattr(b, "resolve", lambda _: "10.0.0.1")
+    with pytest.raises(staged.Q.Stop) as caught:
+        b.request("pi1.local", route, {})
+    mutation = route in ("/v3/kv/txn", "/v3/cluster/member/update")
+    assert isinstance(caught.value, staged.ReadUnavailable) is (
+        state == "silent" and not mutation and not latched
+    )
+    assert isinstance(
+        (
+            caught.value.__cause__.__cause__
+            if isinstance(caught.value, staged.ReadUnavailable)
+            else caught.value.__cause__
+        ),
+        TRANSPORT.Unavailable,
+    ) is (state == "silent")
+    assert b.connections == {"pi1.local": None}
+    assert closes == ["channel", "relay"] and len(dials) == 1
+    with pytest.raises(staged.Q.Stop):
+        b.request("pi1.local", route, {})
+    assert len(dials) == 1
+    assert b.write_failed is (latched or mutation)
+    if mutation or latched:
+        with pytest.raises(staged.Q.Stop, match="uncertain mutation"):
+            b.retry_reads()
+        assert len(dials) == 1
+    elif state == "silent":
+        b.retry_reads()
+        relay.closed.clear()
+        monkeypatch.setattr(
+            grpc, "channel_ready_future", lambda _: SimpleNamespace(result=lambda **kwargs: None)
+        )
+        pool = descriptor_pool.DescriptorPool()
+        descriptors = descriptor_pb2.FileDescriptorSet.FromString(
+            (ROOT / "scripts/ethernet-etcd.desc").read_bytes()
+        )
+        for descriptor in descriptors.file:
+            pool.Add(descriptor)
+        method = pool.FindMethodByName("etcdserverpb." + TRANSPORT.ROUTES[route])
+        response = TRANSPORT.message_class(method.output_type, pool)()
+        response.header.cluster_id, response.header.member_id = CID, MID
+        channel.unary_unary = lambda *args, **kwargs: lambda *args, **kwargs: response
+        result = b.request("pi1.local", route, {})
+        assert result["header"]["cluster_id"] == str(CID)
+        assert len(dials) == 2 and not b.write_failed
+        b.close()
+
+
+def test_real_socket_silent_tls_startup_is_unavailable(tls, endpoint):
+    import threading
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(10)
+    received = threading.Event()
+    release = threading.Event()
+
+    def serve():
+        with listener.accept()[0] as peer:
+            peer.settimeout(10)
+            assert peer.recv(65536)
+            received.set()
+            assert release.wait(10)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(serve)
+        try:
+            with pytest.raises(TRANSPORT.Unavailable, match="startup response pending"):
+                TRANSPORT.Session(
+                    "pi1.local",
+                    CID,
+                    MID,
+                    tls,
+                    lambda: socket.create_connection(listener.getsockname(), timeout=5),
+                )
+            assert received.is_set()
+        finally:
+            release.set()
+            listener.close()
+        worker.result(timeout=10)
+    fresh = session(tls, endpoint)
+    try:
+        assert fresh.request("/v3/maintenance/status", {})["header"]["cluster_id"] == str(CID)
+        assert endpoint["connects"] == 1
+    finally:
+        fresh.close()
+
+
+@pytest.mark.parametrize("event", ["client", "server", "eof", "send-error", "recv-error"])
+def test_relay_records_startup_evidence_before_cleanup(monkeypatch, event):
+    import threading
+    from types import SimpleNamespace
+
+    relay = TRANSPORT.OneConnection.__new__(TRANSPORT.OneConnection)
+    relay.guard = threading.Lock()
+    relay.closed = threading.Event()
+    relay.connect_error = None
+    relay.accepts = relay.connects = relay.client_bytes = relay.server_bytes = 0
+    relay.relay_failed = False
+    snapshots = []
+
+    def recv(_):
+        if event == "recv-error":
+            raise OSError("read failed")
+        return b"" if event == "eof" else b"handshake"
+
+    def send(data):
+        assert not relay.guard.locked()
+        if event == "server":
+            assert relay.server_bytes == len(data)
+        else:
+            assert relay.client_bytes == 0
+        if event == "send-error":
+            raise OSError("send failed")
+
+    local = SimpleNamespace(recv=recv, sendall=send)
+    remote = SimpleNamespace(recv=recv, sendall=send)
+    relay.listener = SimpleNamespace(accept=lambda: (local, None), close=lambda: None)
+    relay.register = lambda sock: sock
+    count = []
+
+    def select(*args):
+        count.append(True)
+        if len(count) == 1:
+            return ([remote if event == "server" else local], [], [])
+        snapshots.append(relay.startup_pending())
+        relay.closed.set()
+        return ([], [], [])
+
+    def close():
+        snapshots.append(relay.startup_pending())
+        relay.closed.set()
+
+    relay.close = close
+    monkeypatch.setattr(TRANSPORT.select, "select", select)
+    relay.run(lambda: remote)
+    assert relay.connects == 1
+    assert any(snapshots) is (event == "client")
+    assert relay.relay_failed is (event in ("eof", "send-error", "recv-error"))
+    assert relay.client_bytes == (9 if event == "client" else 0)
+    assert relay.server_bytes == (9 if event == "server" else 0)

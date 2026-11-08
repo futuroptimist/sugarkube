@@ -48,6 +48,8 @@ class OneConnection:
         self.accepts = 0
         self.connects = 0
         self.connect_error = None
+        self.client_bytes = self.server_bytes = 0
+        self.relay_failed = False
         self.directory = tempfile.TemporaryDirectory(prefix="sugarkube-grpc-")
         self.path = str(Path(self.directory.name) / "socket")
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -84,19 +86,40 @@ class OneConnection:
                 self.connect_error = exc
                 raise
             remote = self.register(remote_socket)
-            self.connects += 1
+            with self.guard:
+                self.connects += 1
             while not self.closed.is_set():
                 readable, _, _ = select.select([local, remote], [], [], 0.1)
                 for source in readable:
                     data = source.recv(65536)
                     if not data:
+                        with self.guard:
+                            self.relay_failed = True
                         return
+                    if source is remote:
+                        with self.guard:
+                            self.server_bytes += len(data)
                     (remote if source is local else local).sendall(data)
+                    if source is local:
+                        with self.guard:
+                            self.client_bytes += len(data)
         except Exception:
-            # The caller sees an unavailable/failed TLS channel or bounded RPC error.
-            pass
+            with self.guard:
+                self.relay_failed = True
         finally:
             self.close()
+
+    def startup_pending(self):
+        # Snapshot before caller cleanup. Silence is not TLS authentication:
+        # a later attempt must still verify the complete enrolled identity.
+        with self.guard:
+            return (
+                self.connects == 1
+                and self.client_bytes > 0
+                and self.server_bytes == 0
+                and not self.relay_failed
+                and not self.closed.is_set()
+            )
 
     def close(self):
         with self.guard:
@@ -154,7 +177,14 @@ class Session:
             grpc.channel_ready_future(self.channel).result(timeout=DEADLINE)
             self.failed = False
         except Exception as exc:
+            pending = (
+                isinstance(exc, grpc.FutureTimeoutError)
+                and self.relay is not None
+                and self.relay.startup_pending()
+            )
             self.close()
+            if pending:
+                raise Unavailable("client TLS startup response pending") from exc
             if self.relay is not None and self.relay.connect_error is not None:
                 raise Unavailable("TCP connection temporarily unavailable") from exc
             raise TransportError(
