@@ -350,3 +350,130 @@ def test_boolean_approval_expiry_is_not_a_timestamp(case, expiry):
     with pytest.raises(P.Refused, match="expired or unbounded approval"):
         run(case)
     assert not case[4].calls
+
+
+@pytest.fixture
+def planner_directory():
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix=".migration-planner-test-", dir=ROOT) as directory:
+        yield Path(directory)
+
+
+@pytest.mark.parametrize("entry", ["standalone", "host"])
+def test_apply_ignores_hostile_valid_planner_bytecode(planner_directory, monkeypatch, entry):
+    import py_compile
+    import struct
+
+    source = planner_directory / "ethernet_migration_plan.py"
+    genuine = (ROOT / "scripts/ethernet_migration_plan.py").read_bytes()
+    marker = planner_directory / "executed"
+    evil = f"from pathlib import Path\nPath({str(marker)!r}).touch()\n".encode()
+    evil += b"#" * (len(genuine) - len(evil))
+    source.write_bytes(evil)
+    before = source.stat()
+    pyc = py_compile.compile(str(source), doraise=True)
+    source.write_bytes(genuine)
+    A.os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert source.stat().st_size == before.st_size
+    header = Path(pyc).read_bytes()[:16]
+    assert header[:4] == importlib.util.MAGIC_NUMBER
+    assert struct.unpack("<III", header[4:]) == (
+        0,
+        int(source.stat().st_mtime),
+        source.stat().st_size,
+    )
+    Path(pyc).parent.chmod(0o777)
+    core = planner_directory / "ethernet_migration_apply.py"
+    core.write_bytes((ROOT / "scripts/ethernet_migration_apply.py").read_bytes())
+    if entry == "standalone":
+        spec = importlib.util.spec_from_file_location("standalone_apply", core)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    else:
+        import test_ethernet_migration_host as host_fixtures
+
+        monkeypatch.setattr(host_fixtures.H, "__file__", str(planner_directory / "host.py"))
+        module = host_fixtures.H.sibling("ethernet_migration_apply")
+    assert not marker.exists()
+    assert module.planner.sha(b"binding") == P.sha(b"binding")
+    assert module.planner.__file__ == str(source)
+    assert (
+        module.planner.CATALOG == planner_directory / "migration/resolver-v1-to-directory-v1.json"
+    )
+
+
+@pytest.mark.parametrize("fault", ["parent", "ancestor", "symlink", "mode", "owner", "size"])
+def test_planner_dependency_rejects_untrusted_source(planner_directory, monkeypatch, fault):
+    directory = planner_directory / "kit"
+    directory.mkdir()
+    source = directory / "ethernet_migration_plan.py"
+    source.write_text("raise AssertionError('untrusted dependency executed')")
+    monkeypatch.setattr(A, "__file__", str(directory / "ethernet_migration_apply.py"))
+    if fault == "parent":
+        directory.chmod(0o777)
+    elif fault == "ancestor":
+        planner_directory.chmod(0o777)
+    elif fault == "symlink":
+        saved = directory / "original"
+        source.rename(saved)
+        source.symlink_to(saved)
+    elif fault == "mode":
+        source.chmod(0o666)
+    elif fault == "owner":
+        monkeypatch.setattr(A.os, "geteuid", lambda: 98765)
+    else:
+        monkeypatch.setattr(A, "_PLANNER_READ_LIMIT", 1)
+    with pytest.raises((RuntimeError, OSError)):
+        A._load_planner()
+
+
+@pytest.mark.parametrize("change", ["grow", "replace"])
+def test_planner_dependency_rejects_read_races(planner_directory, monkeypatch, change):
+    source = planner_directory / "ethernet_migration_plan.py"
+    source.write_text("VALUE = 42\n")
+    monkeypatch.setattr(A, "__file__", str(planner_directory / "core.py"))
+    monkeypatch.setattr(A, "_PLANNER_READ_LIMIT", 32)
+    real_fdopen = A.os.fdopen
+
+    class Reader:
+        def __init__(self, fd, mode):
+            self.handle = real_fdopen(fd, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.handle.close()
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def read(self, size):
+            assert size == 33
+            if change == "grow":
+                source.write_bytes(b"x" * 40)
+            else:
+                source.rename(source.with_suffix(".old"))
+                source.write_text("VALUE = 99\n")
+            return self.handle.read(size)
+
+    monkeypatch.setattr(A.os, "fdopen", Reader)
+    with pytest.raises(RuntimeError, match="changed during read"):
+        A._load_planner()
+
+
+def test_planner_executes_verified_bytes_without_reopening(planner_directory, monkeypatch):
+    import builtins
+
+    source = planner_directory / "ethernet_migration_plan.py"
+    source.write_bytes(b"VALUE = 42\n")
+    monkeypatch.setattr(A, "__file__", str(planner_directory / "core.py"))
+    real_compile = builtins.compile
+
+    def replace(raw, filename, mode):
+        source.write_text("raise AssertionError('reopened planner')")
+        return real_compile(raw, filename, mode)
+
+    monkeypatch.setattr(A, "compile", replace, raising=False)
+    assert A._load_planner().VALUE == 42
