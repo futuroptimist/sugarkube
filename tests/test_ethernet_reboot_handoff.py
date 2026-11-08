@@ -838,6 +838,26 @@ def test_reboot_ingress_admission_precedes_read_and_mutation(fleet, monkeypatch,
     import os
     import stat
 
+    real_lstat = Path.lstat
+    stable_fields = (
+        "st_mode",
+        "st_ino",
+        "st_dev",
+        "st_nlink",
+        "st_uid",
+        "st_gid",
+        "st_size",
+        "st_mtime_ns",
+        "st_ctime_ns",
+        "st_rdev",
+        "st_blksize",
+        "st_blocks",
+    )
+
+    def stable_metadata():
+        metadata = real_lstat(path)
+        return tuple(getattr(metadata, field) for field in stable_fields)
+
     _, _, (handoff, *_), now = fleet
     r, b = handoff.r, handoff.b
     incident = dict(
@@ -889,6 +909,9 @@ def test_reboot_ingress_admission_precedes_read_and_mutation(fleet, monkeypatch,
         path.mkdir()
     elif damage in ("live", "dangling"):
         path.symlink_to(target if damage == "live" else handoff.state / "missing")
+        # Lookup may refresh symlink atime under relatime. Age it deliberately
+        # while preserving mtime; all identity/security metadata must survive.
+        os.utime(path, ns=(1, real_lstat(path).st_mtime_ns), follow_symlinks=False)
     else:
         path.write_text("{}")
         original_lstat = Path.lstat
@@ -905,7 +928,7 @@ def test_reboot_ingress_admission_precedes_read_and_mutation(fleet, monkeypatch,
 
         monkeypatch.setattr(Path, "lstat", metadata)
         monkeypatch.setattr(Q, "trusted_file", TRUSTED_FILE)
-    before = path.lstat()
+    before = stable_metadata()
     original_read = Path.read_text
 
     def read(candidate, *args, **kwargs):
@@ -930,5 +953,5 @@ def test_reboot_ingress_admission_precedes_read_and_mutation(fleet, monkeypatch,
 
     with pytest.raises(Q.Stop):
         operation()
-    assert path.lstat() == before and b.requests == [] and b.events == []
+    assert stable_metadata() == before and b.requests == [] and b.events == []
     assert target.read_text() == "preserve target"

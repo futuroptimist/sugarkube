@@ -28,6 +28,27 @@ SPEC.loader.exec_module(D)
 D.M = Q
 
 
+def stable_evidence_metadata(path):
+    metadata = path.lstat()
+    return tuple(
+        getattr(metadata, field)
+        for field in (
+            "st_mode",
+            "st_ino",
+            "st_dev",
+            "st_nlink",
+            "st_uid",
+            "st_gid",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+            "st_rdev",
+            "st_blksize",
+            "st_blocks",
+        )
+    )
+
+
 class Backend(D.Backend):
     def __init__(self, e, c):
         super().__init__(e, c)
@@ -1127,7 +1148,10 @@ def test_prestart_admits_only_regular_address_evidence(cluster, monkeypatch, kin
         path.mkdir()
     elif kind == "fifo":
         os.mkfifo(path)
-    before = path.lstat() if kind != "absent" else None
+    if path.is_symlink():
+        # Exercise relatime lookup without treating access time as evidence mutation.
+        os.utime(path, ns=(1, path.lstat().st_mtime_ns), follow_symlinks=False)
+    before = stable_evidence_metadata(path) if kind != "absent" else None
     reads = []
     monkeypatch.setattr(Q, "trusted_file", lambda p: reads.append(p))
 
@@ -1146,7 +1170,7 @@ def test_prestart_admits_only_regular_address_evidence(cluster, monkeypatch, kin
         with pytest.raises(Q.Stop, match="nonregular state evidence"):
             controller.pre_start(99)
         assert reads == []
-        assert path.lstat() == before
+        assert stable_evidence_metadata(path) == before
     assert target.read_text() == "unchanged target"
     assert controller.b.events == [] and c.patches == [] and c.updates == []
     assert not controller.path.exists()
@@ -1177,7 +1201,10 @@ def test_prestart_archive_refuses_nonregular_evidence_without_replacement(
         archive.mkdir()
     elif kind == "fifo":
         os.mkfifo(archive)
-    before = archive.lstat() if kind != "absent" else None
+    if archive.is_symlink():
+        # Exercise relatime lookup without treating access time as evidence mutation.
+        os.utime(archive, ns=(1, archive.lstat().st_mtime_ns), follow_symlinks=False)
+    before = stable_evidence_metadata(archive) if kind != "absent" else None
 
     def stop_before_start():
         raise Q.Stop("reached cold admission")
@@ -1190,7 +1217,7 @@ def test_prestart_archive_refuses_nonregular_evidence_without_replacement(
     if kind in ("absent", "valid"):
         assert json.loads(archive.read_text()) == bundle
     else:
-        assert archive.lstat() == before
+        assert stable_evidence_metadata(archive) == before
     assert json.loads(target.read_text()) == bundle
     assert controller.b.events == [] and c.patches == [] and c.updates == []
     assert json.loads(controller.path.read_text())["phase"] == "normal"
@@ -1229,7 +1256,10 @@ def test_prestart_rejects_nonregular_membership_evidence_before_read_or_start(
         path.mkdir()
     else:
         os.mkfifo(path)
-    before = path.lstat()
+    if path.is_symlink():
+        # Exercise relatime lookup without treating access time as evidence mutation.
+        os.utime(path, ns=(1, path.lstat().st_mtime_ns), follow_symlinks=False)
+    before = stable_evidence_metadata(path)
 
     def unexpected_read():
         pytest.fail("membership evidence must be admitted before previous()")
@@ -1237,7 +1267,7 @@ def test_prestart_rejects_nonregular_membership_evidence_before_read_or_start(
     monkeypatch.setattr(controller.r, "previous", unexpected_read)
     with pytest.raises(Q.Stop, match="nonregular state evidence"):
         controller.pre_start(99)
-    assert path.lstat() == before
+    assert stable_evidence_metadata(path) == before
     assert target.read_text() == "preserve original evidence"
     assert not controller.path.exists()
     assert controller.b.events == [] and c.patches == [] and c.updates == []
@@ -1547,7 +1577,10 @@ def test_membership_ingress_is_admitted_on_completion_routes(cluster, monkeypatc
         os.mkfifo(path)
     else:
         path.write_text("{}")
-    before = path.lstat()
+    if path.is_symlink():
+        # Exercise relatime lookup without treating access time as evidence mutation.
+        os.utime(path, ns=(1, path.lstat().st_mtime_ns), follow_symlinks=False)
+    before = stable_evidence_metadata(path)
     original_read = Path.read_text
 
     def read(candidate, *args, **kwargs):
@@ -1570,7 +1603,7 @@ def test_membership_ingress_is_admitted_on_completion_routes(cluster, monkeypatc
     monkeypatch.setattr(S.signal, "signal", lambda *args: None)
     monkeypatch.setattr(__import__("sys"), "argv", ["staged", phase])
     assert S.main() == 2
-    assert path.lstat() == before and b.events == []
+    assert stable_evidence_metadata(path) == before and b.events == []
 
 
 @pytest.mark.parametrize("kind", ["fifo", "trust"])
