@@ -109,6 +109,8 @@ class Backend(D.Backend):
 
 @pytest.fixture
 def cluster(tmp_path, monkeypatch):
+    # Synthetic state lives below pytest /tmp, not a root-owned installed state tree.
+    monkeypatch.setattr(Q, "trusted_file", lambda _: None)
     c, old = D.recovery.__wrapped__(tmp_path)
     c.active, c.nodes, c.patches, c.mutex = set(), {}, [], threading.RLock()
     c.api = True
@@ -1045,3 +1047,116 @@ def test_api_etcd_poll_is_bounded_and_does_not_swallow_proof_failures(
     assert len(attempts) == (2 if failure == "unavailable" else 1)
     assert len(reconnects) == (2 if failure == "unavailable" else 0)
     assert c.patches == [] and c.updates == []
+
+
+@pytest.mark.parametrize("kind", ["absent", "valid", "dangling", "live", "directory", "fifo"])
+@pytest.mark.parametrize("baseline", [True, False])
+def test_prestart_admits_only_regular_address_evidence(cluster, monkeypatch, kind, baseline):
+    import os
+
+    c, (controller, *_) = cluster
+    path = controller.r.address_journal
+    ip = controller.r.e["local_ipv4"]
+    if baseline:
+        c.ips["1"] = ip
+    target = path.parent / "target.json"
+    target.write_text("unchanged target")
+    if kind == "valid":
+        Q.atomic_json(
+            path,
+            dict(
+                phase="verified",
+                ip=ip,
+                old_ip=ip,
+                member_id=controller.r.local["id"],
+                cluster_id=controller.r.e["cluster_id"],
+                node_uid=controller.r.local["node_uid"],
+            ),
+        )
+    elif kind in ("dangling", "live"):
+        path.symlink_to(target if kind == "live" else path.parent / "missing")
+    elif kind == "directory":
+        path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(path)
+    before = path.lstat() if kind != "absent" else None
+    reads = []
+    monkeypatch.setattr(Q, "trusted_file", lambda p: reads.append(p))
+
+    def stop_before_start():
+        raise Q.Stop("reached cold admission")
+
+    monkeypatch.setattr(controller.b, "quiet", stop_before_start)
+    if kind in ("absent", "valid"):
+        if baseline:
+            assert controller.pre_start(99) == "unchanged"
+        else:
+            with pytest.raises(Q.Stop, match="reached cold admission"):
+                controller.pre_start(99)
+        assert reads == ([path] if kind == "valid" else [])
+    else:
+        with pytest.raises(Q.Stop, match="nonregular state evidence"):
+            controller.pre_start(99)
+        assert reads == []
+        assert path.lstat() == before
+    assert target.read_text() == "unchanged target"
+    assert controller.b.events == [] and c.patches == [] and c.updates == []
+    assert not controller.path.exists()
+
+
+@pytest.mark.parametrize("kind", ["absent", "valid", "dangling", "live", "directory", "fifo"])
+def test_prestart_archive_refuses_nonregular_evidence_without_replacement(
+    cluster, monkeypatch, kind
+):
+    import os
+
+    c, (controller, *_) = cluster
+    completed(controller)
+    c.ips["1"] = "10.0.0.21"
+    archive = controller.path.parent / ("staged-archive-" + controller.record["token"] + ".json")
+    bundle = dict(
+        staged=controller.record,
+        membership=controller.r.previous(),
+        address=json.loads(controller.r.address_journal.read_text()),
+    )
+    target = archive.parent / "archive-target"
+    target.write_text(json.dumps(bundle))
+    if kind == "valid":
+        Q.atomic_json(archive, bundle)
+    elif kind in ("dangling", "live"):
+        archive.symlink_to(target if kind == "live" else archive.parent / "missing")
+    elif kind == "directory":
+        archive.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(archive)
+    before = archive.lstat() if kind != "absent" else None
+
+    def stop_before_start():
+        raise Q.Stop("reached cold admission")
+
+    monkeypatch.setattr(controller.b, "quiet", stop_before_start)
+    with pytest.raises(
+        Q.Stop, match="reached cold admission" if kind in ("absent", "valid") else "nonregular"
+    ):
+        controller.pre_start(99)
+    if kind in ("absent", "valid"):
+        assert json.loads(archive.read_text()) == bundle
+    else:
+        assert archive.lstat() == before
+    assert json.loads(target.read_text()) == bundle
+    assert controller.b.events == [] and c.patches == [] and c.updates == []
+    assert json.loads(controller.path.read_text())["phase"] == "normal"
+
+
+def test_regular_state_evidence_propagates_trust_refusal(tmp_path, monkeypatch):
+    path = tmp_path / "evidence"
+    path.write_text("{}")
+
+    def refuse(candidate):
+        assert candidate == path
+        raise Q.Stop("untrusted owner")
+
+    monkeypatch.setattr(Q, "trusted_file", refuse)
+    with pytest.raises(Q.Stop, match="untrusted owner"):
+        S.state_evidence(path)
+    assert path.read_text() == "{}"

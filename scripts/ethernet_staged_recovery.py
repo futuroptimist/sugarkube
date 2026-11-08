@@ -91,6 +91,15 @@ def reboot_handoff(recovery, backend, opt_in):
     return module.Handoff(Q, recovery, backend, opt_in, STATE)
 
 
+def state_evidence(path):
+    """Admit existing private-state evidence without following or replacing links."""
+    if not (path.exists() or path.is_symlink()):
+        return False
+    Q.require(not path.is_symlink() and path.is_file(), "nonregular state evidence")
+    Q.trusted_file(path)
+    return True
+
+
 class ReadUnavailable(Q.Stop):
     """Read-only transport unavailable; no mutation was repeated."""
 
@@ -677,6 +686,7 @@ class Coordinator:
         return True
 
     def pre_start(self, lease_fd):
+        state_evidence(self.r.address_journal)
         previous = self.r.previous()
         baseline = (
             previous["ip"]
@@ -701,7 +711,7 @@ class Coordinator:
                 return self.r.pre_start()
             archive = self.path.parent / ("staged-archive-" + self.record["token"] + ".json")
             bundle = dict(staged=self.record, membership=previous, address=address)
-            if archive.exists():
+            if state_evidence(archive):
                 Q.require(json.loads(archive.read_text()) == bundle, "archive conflicts")
             else:
                 Q.atomic_json(archive, bundle)
