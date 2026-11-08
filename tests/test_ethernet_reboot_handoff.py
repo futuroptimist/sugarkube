@@ -759,7 +759,7 @@ def test_prestart_nonblocking_lease_then_durable_same_boot_fence(fleet, monkeypa
     assert not b.boot and b.requests == ["reboot"]
 
 
-def test_ordinary_cold_recovery_completes_through_running_watcher(fleet):
+def test_ordinary_cold_recovery_completes_through_running_watcher(fleet, monkeypatch):
     c, coordinators, handoffs, _ = fleet
 
     def run(coordinator):
@@ -779,6 +779,13 @@ def test_ordinary_cold_recovery_completes_through_running_watcher(fleet):
         assert handoff.watch() == "complete"
         assert handoff.watch() == "unchanged"
         assert handoff.record is None and handoff.b.requests == []
+
+    def invariant():
+        raise Q.Stop("completion identity changed")
+
+    monkeypatch.setattr(handoff.r, "post_start", invariant)
+    with pytest.raises(Q.Stop, match="completion identity changed"):
+        handoff.watch()
 
 
 @pytest.mark.parametrize(

@@ -104,6 +104,10 @@ class ReadUnavailable(Q.Stop):
     """Read-only transport unavailable; no mutation was repeated."""
 
 
+class ReadinessPending(Q.Stop):
+    """An explicitly validated readiness condition has not converged yet."""
+
+
 class Backend(Q.Backend):
     def __init__(self, enrollment, opt_in):
         super().__init__(enrollment)
@@ -563,7 +567,8 @@ class Recovery(Q.DualRecovery):
                 )
                 if annotation == ip and internal == [ip]:
                     break
-                Q.require(attempt < 2, "Node address readback has not converged")
+                if attempt == 2:
+                    raise ReadinessPending("Node address readback has not converged")
                 time.sleep(2)
         Q.require(self.local_guard() == ip, "address changed after Node reconciliation")
 
@@ -637,7 +642,7 @@ class Coordinator:
             # every write, so a mutation exception escapes and is never replayed.
             try:
                 self.r.prove_transport(incident)
-            except Q.Stop:
+            except ReadUnavailable:
                 self.b.retry_reads()
                 return False
             if self.r.reconcile(incident) == "waiting-for-lock":
@@ -651,7 +656,7 @@ class Coordinator:
                 members[m["id"]]["peerURLs"] == Q.dual_urls(m, self.b.resolve(m["hostname"]))
                 for m in self.r.e["members"]
             )
-        except Q.Stop:
+        except ReadUnavailable:
             self.b.retry_reads()
             return False
 
@@ -787,23 +792,20 @@ class Coordinator:
 
     def normal_proof(self):
         Q.require(self.r.local_guard() == self.record["ip"], "address changed during normal start")
+        self.b.normal_running()
         self.r.prove_etcd(include_local=True)
         self.r.address_readback(self.record["ip"])
         node = self.b.address_node(self.r.host, self.r.local["hostname"].removesuffix(".local"))
         self.r.address_identity(node, self.r.local)
-        Q.require(
-            any(
-                c.get("type") == "Ready"
-                and c.get("status") == "True"
-                and datetime.fromisoformat(
-                    c["lastHeartbeatTime"].replace("Z", "+00:00")
-                ).timestamp()
-                >= self.record["normal_start_at"]
-                for c in node["status"].get("conditions", [])
-            ),
-            "normal Node not Ready",
+        ready = any(
+            c.get("type") == "Ready"
+            and c.get("status") == "True"
+            and datetime.fromisoformat(c["lastHeartbeatTime"].replace("Z", "+00:00")).timestamp()
+            >= self.record["normal_start_at"]
+            for c in node["status"].get("conditions", [])
         )
-        self.b.normal_running()
+        if not ready:
+            raise ReadinessPending("normal Node not Ready")
 
     def post_start(self):
         if not self.record:
@@ -818,8 +820,13 @@ class Coordinator:
                 try:
                     self.normal_proof()
                     break
-                except Q.Stop:
-                    self.b.retry_reads()
+                except (ReadUnavailable, ReadinessPending) as exc:
+                    Q.require(
+                        not getattr(self.b, "write_failed", False),
+                        "uncertain mutation forbids pending retry",
+                    )
+                    if isinstance(exc, ReadUnavailable):
+                        self.b.retry_reads()
                     Q.require(
                         self.clock() < deadline,
                         "normal startup proof timed out; handover stays owned",
@@ -830,12 +837,11 @@ class Coordinator:
             result = self.r.transaction(self.record["token"], release=True)
             Q.require(result.get("succeeded") is True, "handover release outcome unknown")
             self.save("normal")
-        # Full cluster/workload readiness can legitimately await the other two
-        # normal-agent handovers. Never fail the successful service start for it.
-        try:
-            return self.r.post_start()
-        except Q.Stop:
-            return "completion-pending"
+        # Full cluster/workload proof belongs to the completion watcher. Other
+        # members can still be bootstrapping; do not run and suppress its errors
+        # inside this successfully completed local service handoff.
+        previous = self.r.previous()
+        return "unchanged" if previous and previous["phase"] == "complete" else "completion-pending"
 
 
 def load_opt_in():

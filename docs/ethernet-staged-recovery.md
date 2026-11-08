@@ -127,6 +127,9 @@ this runtime. The installation/migration procedure must preserve the existing jo
 install prerequisites before exposing the replacement hook. This document does
 not authorize that operational transition.
 
+ExecStartPost completes only the local handoff; full cluster and workload
+verification remains pending for the completion watcher, which surfaces proof
+failures rather than suppressing them. Completed incidents return unchanged.
 `check-completion` performs the original full-cluster readiness checks after
 handover. It refuses a running address change without stopping or restarting any
 service. A running server may retain pod shims even after its main K3s process
@@ -168,3 +171,11 @@ startup deadline. The native transport distinguishes TCP connection failure,
 previously authenticated connection loss and authenticated RPC availability errors
 from TLS, identity, permission and malformed-response failures. Mutation requests
 never reconnect or replay, and an uncertain-write latch prevents read retries.
+
+
+Membership and normal-start polling accepts only typed read availability failures
+or explicitly validated readiness-pending conditions. Identity, address drift and
+malformed proofs fail immediately. An uncertain write blocks either kind of retry.
+HTTP 503 GET retries intentionally recognize the exact original controller error
+contract. Other statuses, altered error text and all PATCH failures remain fatal;
+parsing arbitrary exception messages would broaden this boundary.

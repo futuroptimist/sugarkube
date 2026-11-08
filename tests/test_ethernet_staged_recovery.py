@@ -61,7 +61,8 @@ class Backend(D.Backend):
 
     def etcd(self, host, *args, input_text=None):
         with self.c.mutex:
-            Q.require(host[2] in self.c.active, "endpoint not yet available")
+            if host[2] not in self.c.active:
+                raise S.ReadUnavailable("endpoint not yet available")
             self.c.quorum = len(self.c.active) >= 2
             return super().etcd(host, *args, input_text=input_text)
 
@@ -701,7 +702,7 @@ def test_poststart_waits_for_fresh_readiness_without_releasing_early(cluster, mo
     def proof():
         attempts.append(1)
         if len(attempts) == 1:
-            raise Q.Stop("heartbeat not fresh")
+            raise S.ReadinessPending("heartbeat not fresh")
 
     def release(token, release=False):
         assert len(attempts) == 2 and release
@@ -709,7 +710,7 @@ def test_poststart_waits_for_fresh_readiness_without_releasing_early(cluster, mo
         return {"succeeded": True}
 
     def pending():
-        raise Q.Stop("other nodes still bootstrapping")
+        pytest.fail("full-cluster completion must run only in the watcher")
 
     monkeypatch.setattr(controller, "normal_proof", proof)
     monkeypatch.setattr(controller.r, "owned", lambda _: None)
@@ -1193,3 +1194,228 @@ def test_prestart_rejects_nonregular_membership_evidence_before_read_or_start(
     assert target.read_text() == "preserve original evidence"
     assert not controller.path.exists()
     assert controller.b.events == [] and c.patches == [] and c.updates == []
+
+
+@pytest.mark.parametrize("phase", ["transport-pending", "completion-pending"])
+@pytest.mark.parametrize("failure", ["availability", "identity", "address", "duplicate", "schema"])
+def test_membership_polls_only_typed_availability(cluster, monkeypatch, phase, failure):
+    _, (controller, *_) = cluster
+    Q.atomic_json(controller.r.path, dict(member_id="1", cluster_id="100", phase=phase))
+    calls, retries = [], []
+
+    def proof(*args, **kwargs):
+        calls.append(True)
+        if failure == "availability":
+            raise S.ReadUnavailable("read transport unavailable")
+        raise Q.Stop(failure)
+
+    monkeypatch.setattr(controller.r, "prove_transport", proof)
+    monkeypatch.setattr(controller.r, "prove_etcd", proof)
+    monkeypatch.setattr(controller.b, "retry_reads", lambda: retries.append(True))
+    if failure == "availability":
+        assert controller.membership() is False
+        assert retries == [True]
+    else:
+        with pytest.raises(Q.Stop, match=failure):
+            controller.membership()
+        assert retries == []
+    assert calls == [True]
+
+
+@pytest.mark.parametrize("failure", ["availability", "readiness", "identity", "address", "schema"])
+def test_normal_start_retries_only_explicit_pending_conditions(cluster, monkeypatch, failure):
+    _, (controller, *_) = cluster
+    controller.record = dict(phase="normal-start-intent", **{"token": "owner"})
+    calls, retries, writes, sleeps = [], [], [], []
+
+    def proof():
+        calls.append(True)
+        if failure == "availability":
+            raise S.ReadUnavailable("read unavailable")
+        if failure == "readiness":
+            raise S.ReadinessPending("heartbeat pending")
+        raise Q.Stop(failure)
+
+    monkeypatch.setattr(controller, "normal_proof", proof)
+    monkeypatch.setattr(controller.b, "retry_reads", lambda: retries.append(True))
+    monkeypatch.setattr(controller.r, "transaction", lambda *args, **kwargs: writes.append(True))
+    controller.clock = lambda: len(calls) * 121
+    controller.sleep = sleeps.append
+    with pytest.raises(
+        Q.Stop, match="timed out" if failure in ("availability", "readiness") else failure
+    ):
+        controller.post_start()
+    assert calls == [True] and writes == [] and sleeps == []
+    assert retries == ([True] if failure == "availability" else [])
+    assert controller.record["phase"] == "normal-start-intent"
+
+
+@pytest.mark.parametrize(
+    "status,mutation,latched",
+    [
+        (503, False, False),
+        (503, True, False),
+        (403, False, False),
+        (403, True, False),
+        (500, False, False),
+        (500, True, False),
+        (502, False, False),
+        (504, False, False),
+        (503, False, True),
+    ],
+)
+def test_actual_http_producer_preserves_exact_503_retry_boundary(
+    tmp_path, monkeypatch, status, mutation, latched
+):
+    config = tmp_path / "kubeconfig"
+    config.write_text(
+        json.dumps(
+            {
+                "clusters": [{"cluster": {"certificate-authority-data": Q.encode("CA")}}],
+                "users": [
+                    {
+                        "user": {
+                            "client-certificate-data": Q.encode("CERT"),
+                            "client-key-data": Q.encode("KEY"),
+                        }
+                    }
+                ],
+            }
+        )
+    )
+    b = S.Backend({"members": [{"hostname": "pi1.local"}], "kubeconfig": str(config)}, {})
+    b.write_failed = latched
+    calls, sleeps = [], []
+    context = SimpleNamespace(
+        load_cert_chain=lambda *args: None, wrap_socket=lambda raw, **kwargs: raw
+    )
+    monkeypatch.setattr(Q.ssl, "create_default_context", lambda **kwargs: context)
+    monkeypatch.setattr(b, "resolve", lambda _: "10.0.0.11")
+    monkeypatch.setattr(
+        b, "connect_peer", lambda *args, **kwargs: SimpleNamespace(close=lambda: None)
+    )
+    monkeypatch.setattr(S.time, "sleep", sleeps.append)
+
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+
+        def getresponse(self):
+            return SimpleNamespace(status=status, read=lambda size: b"{}")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(Q.http.client, "HTTPConnection", Connection)
+    patch = [{"op": "test"}] if mutation else None
+    with pytest.raises(Q.Stop) as caught:
+        b.address_node("pi1.local", "pi1", patch)
+    retry = status == 503 and not mutation and not latched
+    assert isinstance(caught.value, S.ReadUnavailable) is retry
+    assert len(calls) == (3 if retry else 1)
+    assert sleeps == ([2, 2] if retry else [])
+    if not retry:
+        assert str(caught.value) == f"Node API HTTP {status}; no retry"
+    assert b.write_failed is (mutation or latched)
+
+
+@pytest.mark.parametrize("pending", [S.ReadUnavailable, S.ReadinessPending])
+def test_pending_normal_proof_cannot_retry_or_release_after_unknown_write(
+    cluster, monkeypatch, pending
+):
+    _, (controller, *_) = cluster
+    controller.record = dict(phase="normal-start-intent", **{"token": "owner"})
+    controller.b.write_failed = True
+
+    def proof():
+        raise pending("pending")
+
+    monkeypatch.setattr(controller, "normal_proof", proof)
+    monkeypatch.setattr(controller.b, "retry_reads", lambda: pytest.fail("must not refresh"))
+    monkeypatch.setattr(
+        controller.r, "transaction", lambda *args, **kwargs: pytest.fail("must not write")
+    )
+    controller.sleep = lambda _: pytest.fail("must not sleep")
+    with pytest.raises(Q.Stop, match="uncertain mutation"):
+        controller.post_start()
+    assert controller.record["phase"] == "normal-start-intent"
+
+
+def test_normal_handoffs_complete_only_via_completion_cli_and_propagate_errors(
+    cluster, monkeypatch
+):
+    c, controllers = cluster
+
+    def run(controller):
+        controller.pre_start(99)
+        controller.b.normal()
+        assert controller.post_start() == "completion-pending"
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(run, controllers))
+    controller = controllers[0]
+    b, r = controller.b, controller.r
+    assert r.previous()["phase"] == "completion-pending"
+    b.child = None
+    monkeypatch.setattr(S.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(S, "STATE", r.path.parent)
+    monkeypatch.setattr(S, "load_opt_in", lambda: (r.e, {}))
+    monkeypatch.setattr(Q, "private_state", lambda _: None)
+    monkeypatch.setattr(S, "Backend", lambda *args: b)
+    monkeypatch.setattr(S, "Recovery", lambda *args: r)
+    monkeypatch.setattr(b, "close", lambda: None, raising=False)
+    monkeypatch.setattr(S.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", "check-completion"])
+    assert S.main() == 0
+    incident = r.previous()
+    assert incident["phase"] == "verifying"
+    incident["verified_at_monotonic"] -= 31
+    Q.atomic_json(r.path, incident)
+    assert S.main() == 0 and r.previous()["phase"] == "complete"
+    assert controller.post_start() == "unchanged"
+
+    def invariant():
+        raise Q.Stop("completion identity changed")
+
+    monkeypatch.setattr(r, "post_start", invariant)
+    assert S.main() == 2
+
+
+@pytest.mark.parametrize("process_bad", [False, True])
+def test_normal_process_identity_precedes_ready_pending(cluster, monkeypatch, process_bad):
+    c, (controller, *_) = cluster
+    controller.record = dict(ip=c.ips["1"], normal_start_at=0)
+    calls = []
+
+    def running():
+        calls.append("process")
+        if process_bad:
+            raise Q.Stop("normal process identity changed")
+
+    monkeypatch.setattr(controller.b, "normal_running", running)
+    monkeypatch.setattr(controller.r, "prove_etcd", lambda **kwargs: calls.append("etcd"))
+    monkeypatch.setattr(controller.r, "address_readback", lambda ip: calls.append("readback"))
+    monkeypatch.setattr(controller.b, "address_node", lambda *args: copy.deepcopy(c.nodes["pi1"]))
+    with pytest.raises(Q.Stop, match="process identity" if process_bad else "not Ready") as caught:
+        controller.normal_proof()
+    assert isinstance(caught.value, S.ReadinessPending) is (not process_bad)
+    assert calls == (["process"] if process_bad else ["process", "etcd", "readback"])
+
+
+def test_changed_503_exception_text_is_not_a_retry_contract(monkeypatch):
+    b = S.Backend({}, {})
+    calls = []
+
+    def response(*args):
+        calls.append(True)
+        raise Q.Stop("Node API HTTP 503; wording changed")
+
+    monkeypatch.setattr(Q.Backend, "address_node", response)
+    monkeypatch.setattr(S.time, "sleep", lambda _: pytest.fail("must not retry"))
+    with pytest.raises(Q.Stop, match="wording changed") as caught:
+        b.address_node("pi1.local", "pi1")
+    assert not isinstance(caught.value, S.ReadUnavailable)
+    assert calls == [True] and not b.write_failed
