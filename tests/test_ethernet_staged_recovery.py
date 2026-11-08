@@ -520,7 +520,8 @@ def test_staged_loaded_hook_and_pins(tmp_path, monkeypatch):
 def test_environment_files_are_parsed_without_ambient_values(tmp_path, monkeypatch):
     envfile = tmp_path / "environment"
     envfile.write_text('# comment\nK3S_NODE_NAME="from file"\n\n')
-    b = S.Backend({}, {})
+    b = S.Backend({"files": {str(envfile): Q.digest(envfile.read_bytes())}}, {})
+    monkeypatch.setattr(Q, "trusted_file", lambda _: None)
     monkeypatch.setattr(
         b,
         "command",
@@ -1605,3 +1606,143 @@ def test_present_invalid_staged_record_cannot_start_or_replace(cluster, monkeypa
         S.Coordinator(controller.r, path).pre_start(9)
     assert path.read_bytes() == before
     assert not controller.b.events and not c.patches
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "created",
+        "removed",
+        "changed",
+        "uid",
+        "mode",
+        "directory",
+        "fifo",
+        "live",
+        "dangling",
+        "unenrolled",
+        "parent-mode",
+        "valid",
+        "absent",
+    ],
+)
+def test_start_binds_environment_file_bytes_after_config(tmp_path, monkeypatch, change):
+    import os
+    import stat
+
+    path = tmp_path / "environment"
+    original = b'K3S_NODE_NAME="original"\n'
+    if change not in ("created", "absent"):
+        path.write_bytes(original)
+    files = {str(path): None if change in ("created", "absent") else Q.digest(original)}
+    if change == "unenrolled":
+        files = {}
+    b = S.Backend({"files": files}, {})
+    monkeypatch.setattr(b, "service_context", lambda: None)
+    monkeypatch.setattr(b, "quiet", lambda: None)
+
+    def config():
+        if change in ("created", "changed"):
+            path.write_bytes(b"K3S_CLUSTER_RESET=true\n")
+        elif change == "removed":
+            path.unlink()
+        elif change in ("directory", "fifo", "live", "dangling"):
+            path.unlink()
+            if change == "directory":
+                path.mkdir()
+            elif change == "fifo":
+                os.mkfifo(path)
+            else:
+                target = tmp_path / "target"
+                if change == "live":
+                    target.write_bytes(original)
+                path.symlink_to(target)
+
+    monkeypatch.setattr(b, "config", config)
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda argv: (
+            "ExecStart={ argv[]=/usr/local/bin/k3s server ; ignore_errors=no ; }"
+            if argv[-1] == "--property=ExecStart"
+            else f"Environment=\nEnvironmentFiles={path} (ignore_errors=yes)"
+        ),
+    )
+    original_lstat = Path.lstat
+
+    def metadata(candidate, *args, **kwargs):
+        if candidate in path.parents:
+            mode = 0o777 if change == "parent-mode" and candidate == path.parent else 0o700
+            return SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | mode)
+        if candidate == path and change in (
+            "uid",
+            "mode",
+            "valid",
+            "created",
+            "changed",
+            "parent-mode",
+        ):
+            return SimpleNamespace(
+                st_uid=1000 if change == "uid" else 0,
+                st_mode=stat.S_IFREG | (0o666 if change == "mode" else 0o600),
+            )
+        return original_lstat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+    launches = []
+
+    def launch(argv, **kwargs):
+        launches.append(kwargs["env"])
+        return SimpleNamespace(pid=123)
+
+    monkeypatch.setattr(S.subprocess, "Popen", launch)
+    monkeypatch.setattr(b, "process_executable", lambda *args, **kwargs: True)
+    if change in ("valid", "absent"):
+        assert b.start(9) == 123
+        assert launches[0].get("K3S_NODE_NAME") == ("original" if change == "valid" else None)
+    else:
+        with pytest.raises(Q.Stop):
+            b.start(9)
+        assert not launches
+
+
+def test_environment_parser_uses_only_verified_bytes(tmp_path, monkeypatch):
+    path = tmp_path / "environment"
+    content = b"K3S_NODE_NAME=verified\n"
+    path.write_bytes(content)
+    b = S.Backend({"files": {str(path): Q.digest(content)}}, {})
+    monkeypatch.setattr(Q, "trusted_file", lambda _: None)
+    monkeypatch.setattr(b, "service_context", lambda: None)
+    monkeypatch.setattr(b, "quiet", lambda: None)
+    monkeypatch.setattr(b, "config", lambda: None)
+    monkeypatch.setattr(b, "process_executable", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        b,
+        "command",
+        lambda argv: (
+            "ExecStart={ argv[]=/usr/local/bin/k3s server ; ignore_errors=no ; }"
+            if argv[-1] == "--property=ExecStart"
+            else f"Environment=\nEnvironmentFiles={path} (ignore_errors=yes)"
+        ),
+    )
+    launches = []
+
+    def launch(argv, **kwargs):
+        launches.append(kwargs["env"])
+        return SimpleNamespace(pid=123)
+
+    monkeypatch.setattr(S.subprocess, "Popen", launch)
+    reads = []
+
+    def read(candidate):
+        assert candidate == path
+        reads.append(candidate)
+        path.write_bytes(b"K3S_CLUSTER_RESET=true\n")
+        return content
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "read_text", lambda *_: pytest.fail("must not reread parsed bytes"))
+    assert b.start(9) == 123
+    env = launches[0]
+    assert env["K3S_NODE_NAME"] == "verified" and "K3S_CLUSTER_RESET" not in env
+    assert reads == [path]

@@ -320,10 +320,18 @@ class Backend(Q.Backend):
             r"(/[^ ;]+) \(ignore_errors=(?:yes|no)\)", values["EnvironmentFiles"]
         ):
             path = Path(filename)
-            if path.exists():
-                for line in path.read_text().splitlines():
+            Q.require(filename in self.e["files"], "environment file not enrolled")
+            expected = self.e["files"][filename]
+            if path.exists() or path.is_symlink():
+                Q.require(not path.is_symlink() and path.is_file(), "nonregular environment file")
+                Q.trusted_file(path)
+                content = path.read_bytes()
+                Q.require(Q.digest(content) == expected, "environment file changed")
+                for line in content.decode().splitlines():
                     if line.strip() and not line.lstrip().startswith(("#", ";")):
                         assignments.extend(shlex.split(line))
+            else:
+                Q.require(expected is None, "enrolled environment file missing")
         env = {
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "HOME": "/root",
