@@ -527,6 +527,10 @@ class Backend(Q.Backend):
 class Recovery(Q.DualRecovery):
     """Address proof after original quorum and numeric peer repair, without Ready."""
 
+    def previous(self):
+        state_evidence(self.path)
+        return super().previous()
+
     def prepare_node_address(self, ip, old):
         # The base method need not persist a journal if native controllers have
         # already converged locally. Retain its exact baseline only for this call.
@@ -540,7 +544,7 @@ class Recovery(Q.DualRecovery):
         Q.require(not self.address_journal.is_symlink(), "symlink Node journal unsupported")
         record = (
             json.loads(self.address_journal.read_text())
-            if self.address_journal.exists()
+            if state_evidence(self.address_journal)
             else {"phase": "prepared", "old_ip": ip}
         )
         Q.require(

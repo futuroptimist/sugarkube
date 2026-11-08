@@ -976,12 +976,21 @@ def test_etcd_retry_type_is_read_only_and_cannot_clear_write_latch(
 
 def test_peer_handover_etcd_gap_during_api_preflight_does_not_latch(cluster, monkeypatch):
     c, coordinators = cluster
-    stopped, observed = threading.Event(), threading.Event()
+    stopped, observed, api_ready = threading.Event(), threading.Event(), threading.Event()
     original_stop, original_etcd = Backend.stop, Backend.etcd
     original_proof = S.Recovery.address_proof
     delayed = []
+    cancelled = threading.Event()
+    expires = time.monotonic() + 10
+    original_alive = Backend.alive
+
+    def alive(self):
+        Q.require(not cancelled.is_set() and time.monotonic() < expires, "test worker deadline")
+        original_alive(self)
 
     def stop(self):
+        if self.mid == "1":
+            assert api_ready.wait(5), "other voter never reached API preflight"
         original_stop(self)
         if self.mid == "1":
             stopped.set()
@@ -996,6 +1005,7 @@ def test_peer_handover_etcd_gap_during_api_preflight_does_not_latch(cluster, mon
     def proof(self, ip, old):
         if self.local["id"] == "2" and not delayed:
             delayed.append(True)
+            api_ready.set()
             assert stopped.wait(5), "first handover never stopped its child"
             try:
                 return original_proof(self, ip, old)
@@ -1004,14 +1014,19 @@ def test_peer_handover_etcd_gap_during_api_preflight_does_not_latch(cluster, mon
                 raise
         return original_proof(self, ip, old)
 
+    monkeypatch.setattr(Backend, "alive", alive)
     monkeypatch.setattr(Backend, "stop", stop)
     monkeypatch.setattr(Backend, "etcd", etcd)
     monkeypatch.setattr(S.Recovery, "address_proof", proof)
 
     def run(coordinator):
-        assert coordinator.pre_start(99) == "normal-start-authorized"
-        coordinator.b.normal()
-        coordinator.post_start()
+        try:
+            assert coordinator.pre_start(99) == "normal-start-authorized"
+            coordinator.b.normal()
+            coordinator.post_start()
+        except BaseException:
+            cancelled.set()
+            raise
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(run, coordinators))
@@ -1484,3 +1499,74 @@ def test_constructor_admits_trusted_regular_leaf_before_read(tmp_path, monkeypat
         with pytest.raises(Q.Stop, match=message):
             S.Coordinator(recovery, path)
         assert calls == (["trust"] if kind in ("uid", "mode") else [])
+
+
+@pytest.mark.parametrize("kind", ["dangling", "fifo", "trust"])
+@pytest.mark.parametrize("phase", ["post-start", "check-completion"])
+def test_membership_ingress_is_admitted_on_completion_routes(cluster, monkeypatch, kind, phase):
+    import os
+
+    _, (controller, *_) = cluster
+    b, r = controller.b, controller.r
+    path = r.path
+    if kind == "dangling":
+        path.symlink_to(path.parent / "missing")
+    elif kind == "fifo":
+        os.mkfifo(path)
+    else:
+        path.write_text("{}")
+    before = path.lstat()
+    original_read = Path.read_text
+
+    def read(candidate, *args, **kwargs):
+        if candidate == path:
+            pytest.fail("invalid membership evidence must not be read")
+        return original_read(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    if kind == "trust":
+        monkeypatch.setattr(Q, "trusted_file", lambda p: Q.require(p != path, "untrusted leaf"))
+    b.child = None
+    monkeypatch.setattr(S.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(S, "STATE", path.parent)
+    monkeypatch.setattr(S, "load_opt_in", lambda: (r.e, {}))
+    monkeypatch.setattr(Q, "private_state", lambda _: None)
+    monkeypatch.setattr(S, "Backend", lambda *args: b)
+    monkeypatch.setattr(S, "Recovery", lambda *args: r)
+    monkeypatch.setattr(b, "service_context", lambda: None, raising=False)
+    monkeypatch.setattr(b, "close", lambda: None, raising=False)
+    monkeypatch.setattr(S.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(__import__("sys"), "argv", ["staged", phase])
+    assert S.main() == 2
+    assert path.lstat() == before and b.events == []
+
+
+@pytest.mark.parametrize("kind", ["fifo", "trust"])
+def test_poststart_address_readback_admits_leaf_before_read(cluster, monkeypatch, kind):
+    import os
+
+    c, (controller, *_) = cluster
+    r, b = controller.r, controller.b
+    controller.record = dict(phase="normal-start-intent", ip=c.ips["1"], normal_start_at=0)
+    path = r.address_journal
+    if kind == "fifo":
+        os.mkfifo(path)
+    else:
+        path.write_text("{}")
+        monkeypatch.setattr(Q, "trusted_file", lambda p: Q.require(p != path, "untrusted leaf"))
+    before = path.lstat()
+    monkeypatch.setattr(b, "normal_running", lambda: None)
+    monkeypatch.setattr(r, "prove_etcd", lambda **kwargs: None)
+    monkeypatch.setattr(r, "transaction", lambda *args, **kwargs: pytest.fail("must not release"))
+    original_read = Path.read_text
+
+    def read(candidate, *args, **kwargs):
+        if candidate == path:
+            pytest.fail("invalid address evidence must not be read")
+        return original_read(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(Q.Stop):
+        controller.post_start()
+    assert path.lstat() == before
+    assert controller.record["phase"] == "normal-start-intent" and b.events == []

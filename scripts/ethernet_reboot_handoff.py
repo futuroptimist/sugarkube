@@ -21,8 +21,7 @@ class Handoff:
         self.observation = state / "reboot-observation.json"
         self.record = None
         if self.path.exists() or self.path.is_symlink():
-            q.trusted_file(self.path)
-            self.record = json.loads(self.path.read_text())
+            self.record = self.read_record(self.path)
             q.require(
                 self.record["enrollment_sha256"] == opt_in["enrollment_sha256"]
                 and self.record["cluster_id"] == recovery.e["cluster_id"]
@@ -30,6 +29,11 @@ class Handoff:
                 and re.fullmatch("[0-9a-f]{32}", self.record["id"]),
                 "reboot handoff identity changed",
             )
+
+    def read_record(self, path):
+        self.q.require(not path.is_symlink() and path.is_file(), "nonregular reboot evidence")
+        self.q.trusted_file(path)
+        return json.loads(path.read_text())
 
     def save(self, phase, **extra):
         self.record.update(phase=phase, **extra)
@@ -43,8 +47,7 @@ class Handoff:
         )
         staged = self.state / "staged.json"
         if staged.exists() or staged.is_symlink():
-            self.q.trusted_file(staged)
-            previous = json.loads(staged.read_text())
+            previous = self.read_record(staged)
             self.q.require(
                 previous["phase"] == "normal"
                 and incident
@@ -55,8 +58,7 @@ class Handoff:
                 "unfinished staged lifecycle forbids reboot",
             )
         if self.r.address_journal.exists() or self.r.address_journal.is_symlink():
-            self.q.trusted_file(self.r.address_journal)
-            previous = json.loads(self.r.address_journal.read_text())
+            previous = self.read_record(self.r.address_journal)
             self.q.require(
                 previous["phase"] == "verified"
                 and previous["ip"] == baseline
@@ -116,8 +118,7 @@ class Handoff:
 
     def linked_stage(self):
         path = self.state / "staged.json"
-        self.q.trusted_file(path)
-        staged = json.loads(path.read_text())
+        staged = self.read_record(path)
         self.q.require(
             staged["token"] == self.record.get("staged_id")
             and staged["membership_id"] == self.record["membership_id"]
@@ -139,8 +140,7 @@ class Handoff:
         path = self.state / "staged.json"
         if not (path.exists() or path.is_symlink()):
             return False
-        self.q.trusted_file(path)
-        staged = json.loads(path.read_text())
+        staged = self.read_record(path)
         self.q.require(
             staged["phase"] == "normal"
             and staged["member_id"] == self.r.local["id"]
@@ -155,8 +155,7 @@ class Handoff:
             and incident["phase"] in ("completion-pending", "verifying", "complete"),
             "ordinary staged completion identity or phase differs",
         )
-        self.q.trusted_file(self.r.address_journal)
-        address = json.loads(self.r.address_journal.read_text())
+        address = self.read_record(self.r.address_journal)
         self.q.require(
             address["phase"] == "verified"
             and address["member_id"] == self.r.local["id"]
@@ -197,8 +196,7 @@ class Handoff:
         now = time.monotonic()
         observed = {}
         if self.observation.exists() or self.observation.is_symlink():
-            self.q.trusted_file(self.observation)
-            observed = json.loads(self.observation.read_text())
+            observed = self.read_record(self.observation)
             self.q.require(
                 isinstance(observed, dict)
                 and type(observed.get("monotonic")) in (int, float)
@@ -245,10 +243,7 @@ class Handoff:
             )
             archive = self.state / ("reboot-archive-" + self.record["id"] + ".json")
             if archive.exists() or archive.is_symlink():
-                self.q.trusted_file(archive)
-                self.q.require(
-                    json.loads(archive.read_text()) == self.record, "reboot archive conflicts"
-                )
+                self.q.require(self.read_record(archive) == self.record, "reboot archive conflicts")
             else:
                 self.q.atomic_json(archive, self.record)
         self.record = dict(

@@ -16,6 +16,7 @@ SPEC = importlib.util.spec_from_file_location(
 D = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(D)
 S, Q = D.S, D.Q
+TRUSTED_FILE = Q.trusted_file
 SPEC = importlib.util.spec_from_file_location("reboot", ROOT / "scripts/ethernet_reboot_handoff.py")
 R = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(R)
@@ -815,3 +816,119 @@ def test_malformed_debounce_refuses_without_dispatch(fleet, value):
     with pytest.raises(Q.Stop, match="invalid debounce"):
         handoff.watch()
     assert not handoff.path.exists() and handoff.b.requests == []
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "record",
+        "clean-staged",
+        "clean-address",
+        "linked",
+        "ordinary-staged",
+        "ordinary-address",
+        "observation",
+        "archive",
+        "membership",
+        "before-start-membership",
+    ],
+)
+@pytest.mark.parametrize("damage", ["fifo", "directory", "live", "dangling", "uid", "mode"])
+def test_reboot_ingress_admission_precedes_read_and_mutation(fleet, monkeypatch, boundary, damage):
+    import os
+    import stat
+
+    _, _, (handoff, *_), now = fleet
+    r, b = handoff.r, handoff.b
+    incident = dict(
+        member_id=r.local["id"],
+        cluster_id=r.e["cluster_id"],
+        ip=b.address(),
+        phase="completion-pending",
+        **{"token": "b" * 32},
+    )
+    staged = dict(
+        member_id=r.local["id"],
+        cluster_id=r.e["cluster_id"],
+        ip=b.address(),
+        phase="normal",
+        membership_id="b" * 32,
+        **{"token": "a" * 32},
+    )
+    path = {
+        "record": handoff.path,
+        "clean-staged": handoff.state / "staged.json",
+        "clean-address": r.address_journal,
+        "linked": handoff.state / "staged.json",
+        "ordinary-staged": handoff.state / "staged.json",
+        "ordinary-address": r.address_journal,
+        "observation": handoff.observation,
+        "archive": handoff.state / ("reboot-archive-" + "c" * 32 + ".json"),
+        "membership": r.path,
+        "before-start-membership": r.path,
+    }[boundary]
+    if boundary == "before-start-membership":
+        b.current_boot = BOOT_B
+        handoff.record = dict(
+            phase="reboot-requested",
+            origin_boot_id=BOOT_A,
+            ip=b.address(),
+            old_ip=r.e["local_ipv4"],
+        )
+    if boundary == "ordinary-address":
+        Q.atomic_json(handoff.state / "staged.json", staged)
+    if boundary == "archive":
+        assert handoff.watch() == "observing-running-address"
+        now[0] = 31
+        handoff.record = dict(phase="complete", origin_boot_id=BOOT_C, id="c" * 32)
+    target = handoff.state / "untouched-target"
+    target.write_text("preserve target")
+    if damage == "fifo":
+        os.mkfifo(path)
+    elif damage == "directory":
+        path.mkdir()
+    elif damage in ("live", "dangling"):
+        path.symlink_to(target if damage == "live" else handoff.state / "missing")
+    else:
+        path.write_text("{}")
+        original_lstat = Path.lstat
+
+        def metadata(candidate, *args, **kwargs):
+            if candidate in path.parents:
+                return SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o700)
+            if candidate == path:
+                return SimpleNamespace(
+                    st_uid=1000 if damage == "uid" else 0,
+                    st_mode=stat.S_IFREG | (0o666 if damage == "mode" else 0o600),
+                )
+            return original_lstat(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", metadata)
+        monkeypatch.setattr(Q, "trusted_file", TRUSTED_FILE)
+    before = path.lstat()
+    original_read = Path.read_text
+
+    def read(candidate, *args, **kwargs):
+        if candidate == path:
+            pytest.fail("unadmitted reboot evidence must never be read")
+        return original_read(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+
+    def operation():
+        if boundary == "before-start-membership":
+            return handoff.before_start()
+        if boundary == "record":
+            return R.Handoff(Q, r, b, handoff.opt, handoff.state)
+        if boundary.startswith("clean"):
+            return handoff.clean_previous(r.e["local_ipv4"])
+        if boundary == "linked":
+            return handoff.linked_stage()
+        if boundary.startswith("ordinary"):
+            return handoff.ordinary_completion(b.address(), incident)
+        return handoff.watch()
+
+    with pytest.raises(Q.Stop):
+        operation()
+    assert path.lstat() == before and b.requests == [] and b.events == []
+    assert target.read_text() == "preserve target"
