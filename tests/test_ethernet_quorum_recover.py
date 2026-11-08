@@ -1940,10 +1940,12 @@ def test_v2_cli_records_only_confirmed_enrollment_transition(
 
 
 @pytest.mark.parametrize("damage", [None, "lifetime", "binding", "source", "view", "mount"])
+@pytest.mark.parametrize("k3s_pid", ["0", "43"])
 def test_directory_resolver_controller_guard_keeps_exact_checks(
-    resolver_backend, virtual_root, monkeypatch, damage
+    resolver_backend, virtual_root, monkeypatch, damage, k3s_pid
 ):
     backend, props, state = resolver_backend
+    props["k3s"]["MainPID"] = k3s_pid
     path, write = virtual_root
     dns = MODULE.sibling("ethernet_mdns_resolver")
     backend.e["resolver_view"] = {"kind": "resolved-stub-directory-v1"}
@@ -1977,12 +1979,12 @@ def test_directory_resolver_controller_guard_keeps_exact_checks(
         )
     elif damage == "view":
         (state / "resolved/stub-resolv.conf").write_text("wrong")
-    if damage:
+    if damage and not (damage == "mount" and k3s_pid == "0"):
         with pytest.raises((MODULE.Stop, ValueError)):
             backend.resolver_ready()
     else:
         backend.resolver_ready()
-        assert calls == ["directory", "running"]
+        assert calls == (["directory", "running"] if int(k3s_pid) else ["directory"])
 
 
 def test_invalid_prepared_view_stops_enrollment_before_inventory_or_writes(tmp_path, monkeypatch):

@@ -18,11 +18,13 @@ import http.client
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 import re
 import shlex
 import socket
 import ssl
+import stat
 import subprocess
 import tempfile
 import time
@@ -1870,12 +1872,15 @@ def trusted_file(path):
         not path.is_symlink() and info.st_uid == 0 and info.st_mode & 0o022 == 0,
         "untrusted enrollment permissions",
     )
+    entry = info
     for parent in path.parents:
         info = parent.lstat()
         require(
             not parent.is_symlink() and info.st_uid == 0 and info.st_mode & 0o022 == 0,
             "untrusted parent directory",
         )
+
+    return entry
 
 
 def install_directory(path, mode=0o755):
@@ -2065,6 +2070,200 @@ def enroll_checked(e, destination, backend):
     return "enrolled; hooks and timer installed but not reloaded or enabled"
 
 
+def migration_service_context(backend, phase):
+    """Require the current hook to belong to the actual K3s systemd invocation."""
+    invocation = os.environ.get("INVOCATION_ID", "")
+    require(
+        re.fullmatch(r"[0-9a-f]{32}", invocation) is not None,
+        "migration requires a systemd invocation",
+    )
+    raw = backend.command(
+        [
+            "/usr/bin/systemctl",
+            "show",
+            "k3s.service",
+            "--property=InvocationID,SubState,ControlGroup",
+        ]
+    )
+    properties = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+    require(
+        properties.get("InvocationID") == invocation
+        and properties.get("SubState")
+        == {"pre-start": "start-pre", "post-start": "start-post"}[phase]
+        and properties.get("ControlGroup") == "/system.slice/k3s.service",
+        "migration systemd invocation mismatch",
+    )
+    groups = Path("/proc/self/cgroup").read_text().splitlines()
+    require(
+        groups == ["0::/system.slice/k3s.service"],
+        "migration hook outside supported service cgroup",
+    )
+    return invocation
+
+
+def migration_record_bytes(path, max_bytes=65536):
+    """Read trusted bytes without following a swapped leaf or accepting drift."""
+
+    def identity(info):
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_uid,
+            info.st_gid,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+            info.st_nlink,
+        )
+
+    try:
+        before = trusted_file(path)
+        require(
+            stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
+            "migration record is not a single-link regular file",
+        )
+        require(before.st_size <= max_bytes, "migration record too large")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            require(
+                identity(os.fstat(handle.fileno())) == identity(before),
+                "migration record changed during open",
+            )
+            raw = handle.read(max_bytes + 1)
+            require(len(raw) <= max_bytes, "migration record too large")
+            require(
+                len(raw) == before.st_size
+                and identity(os.fstat(handle.fileno())) == identity(before)
+                and identity(trusted_file(path)) == identity(before),
+                "migration record changed during read",
+            )
+        return raw
+    except OSError as exc:
+        raise Stop("cannot read trusted migration record") from exc
+
+
+def migration_start_guard(enrollment_path, backend, state_dir, phase):
+    """Fence an active migration; permit one exact baseline systemd invocation.
+
+    Called under the controller flock before any controller action. No membership,
+    Node, enrollment or original recovery-journal mutation is permitted here.
+    """
+    intent_path = state_dir / "migration-intent.json"
+    if not intent_path.exists() and not intent_path.is_symlink():
+        return None
+
+    def read_record(path, max_bytes=65536):
+
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                require(key not in result, "duplicate migration record key")
+                result[key] = value
+            return result
+
+        def finite(_):
+            raise Stop("nonfinite migration JSON number")
+
+        def number(text):
+            value = float(text)
+            require(math.isfinite(value), "nonfinite migration JSON number")
+            return value
+
+        raw = migration_record_bytes(path, max_bytes)
+        try:
+            value = json.loads(
+                raw, object_pairs_hook=pairs, parse_constant=finite, parse_float=number
+            )
+        except (ValueError, RecursionError) as exc:
+            raise Stop("invalid migration record JSON") from exc
+        require(type(value) is dict, "invalid migration record")
+        return value
+
+    intent = read_record(intent_path)
+    owner = intent.get("owner")
+    require(
+        type(owner) is dict
+        and set(owner) == {"operation_id", "plan_sha256"}
+        and all(type(v) is str and re.fullmatch(r"[0-9a-f]{64}", v) for v in owner.values())
+        and owner["plan_sha256"] == intent.get("plan_sha256")
+        and intent.get("cluster_id") == backend.e["cluster_id"]
+        and intent.get("local_member_id") == backend.e["local_member_id"],
+        "migration owner or identity mismatch",
+    )
+    expected = {
+        "schema_version": 1,
+        "owner": owner,
+        "target_enrollment_sha256": intent["target_enrollment_sha256"],
+        "incident_sha256": intent["incident_sha256"],
+        "baseline_ipv4": intent["baseline_ipv4"],
+    }
+    complete = state_dir / "migration-complete.json"
+    if complete.exists() or complete.is_symlink():
+        require(read_record(complete) == expected, "migration completion mismatch")
+        # The committed target uses canonical JSON. Normal arm writes may
+        # change JSON whitespace without changing any enrolled fact. Preserve
+        # the full content commitment while refusing duplicate/nonfinite JSON.
+        enrollment = read_record(enrollment_path, max_bytes=8 * 1024 * 1024)
+        canonical = json.dumps(
+            enrollment, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+        require(
+            digest(canonical) == expected["target_enrollment_sha256"],
+            "completed migration enrollment changed",
+        )
+        return None
+    require(phase in {"pre-start", "post-start"}, "migration intent blocks recovery")
+    permit = state_dir / "migration-start-permit.json"
+    require(read_record(permit) == expected, "migration start permit mismatch")
+    incident = state_dir / "incident.json"
+    enrollment_raw = migration_record_bytes(enrollment_path, max_bytes=8 * 1024 * 1024)
+    incident_raw = migration_record_bytes(incident, max_bytes=8 * 1024 * 1024)
+    require(
+        digest(enrollment_raw) == expected["target_enrollment_sha256"]
+        and digest(incident_raw) == expected["incident_sha256"]
+        and backend.e["local_ipv4"] == expected["baseline_ipv4"]
+        and backend.address() == expected["baseline_ipv4"],
+        "migration baseline changed",
+    )
+    journal = json.loads(incident_raw)
+    require(
+        journal.get("phase") == "complete" and journal.get("kind") == "enrollment",
+        "migration original journal is not complete",
+    )
+    address = state_dir / "node-address.json"
+    require(not address.exists() and not address.is_symlink(), "migration address intent exists")
+    host = next(
+        m["hostname"] for m in backend.e["members"] if m["id"] != backend.e["local_member_id"]
+    )
+    values = backend.etcd(host, "get", KEY).get("kvs", [])
+    lock_value = json.dumps(owner, sort_keys=True, separators=(",", ":"))
+    require(
+        len(values) == 1 and values[0].get("value") == encode(lock_value),
+        "migration cluster owner mismatch",
+    )
+    invocation = migration_service_context(backend, phase)
+    consumed = state_dir / "migration-start-consumed.json"
+    consumed_record = {**expected, "invocation_id": invocation}
+    if phase == "post-start":
+        require(read_record(consumed) == consumed_record, "migration invocation mismatch")
+        return "migration-start-observed"
+    backend.config()
+    backend.network(expected["baseline_ipv4"])
+    # Exclusive creation, not replacement: an unknown previous start stays latched.
+    out = os.open(consumed, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(out, "wb") as handle:
+        handle.write(json.dumps(consumed_record, sort_keys=True).encode())
+        handle.flush()
+        os.fsync(handle.fileno())
+    fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return "migration-start-authorized"
+
+
 def private_state(path):
     # Journal durability also requires the state directory's own entry to survive
     # power loss before a membership write or start authorization can occur.
@@ -2132,6 +2331,11 @@ def main():
     try:
         require(os.geteuid() == 0, "root-owned enrollment and state required")
         if args.phase in ("enroll", "prepare-resolver"):
+            migration_intent = args.state_dir / "migration-intent.json"
+            require(
+                not migration_intent.exists() and not migration_intent.is_symlink(),
+                "migration history requires separate enrollment review",
+            )
             require(args.request is not None, "explicit healthy-time enrollment request required")
             print(
                 prepare_resolver(args.request)
@@ -2145,6 +2349,10 @@ def main():
         backend = Backend(enrollment)
         with (args.state_dir / "lock").open("a") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            guarded = migration_start_guard(args.enrollment, backend, args.state_dir, args.phase)
+            if guarded is not None:
+                print(guarded)
+                return 0
             recovery_class = DualRecovery if enrollment["schema_version"] == 2 else Recovery
             recovery = recovery_class(enrollment, backend, args.state_dir / "incident.json")
             require(
