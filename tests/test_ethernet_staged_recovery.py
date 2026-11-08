@@ -61,9 +61,21 @@ class Backend(D.Backend):
 
     def etcd(self, host, *args, input_text=None):
         with self.c.mutex:
-            if host[2] not in self.c.active:
-                raise S.ReadUnavailable("endpoint not yet available")
+            readonly = args in (
+                ("endpoint", "status"),
+                ("endpoint", "health"),
+                ("member", "list"),
+            ) or (
+                len(args) == 2
+                and args[0] == "get"
+                and args[1]
+                in {Q.KEY, *(Q.KEY + "/enrollment/" + m["id"] for m in self.e["members"])}
+            )
+            available = host[2] in self.c.active
             self.c.quorum = len(self.c.active) >= 2
+            if readonly and (not available or not self.c.quorum):
+                raise S.ReadUnavailable("simulated read endpoint/quorum not yet available")
+            Q.require(available, "endpoint not yet available")
             return super().etcd(host, *args, input_text=input_text)
 
     def address_node(self, host, name, patch=None, status=False):
@@ -159,7 +171,19 @@ def test_three_original_cold_starts_repair_before_serial_normal_handover(cluster
         for member in controller.r.e["members"]:
             c.markers[Q.KEY + "/enrollment/" + member["id"]] = controller.r.marker(member)
 
-    def run(controller):
+    cancelled = threading.Event()
+    deadline = time.monotonic() + 10
+    for controller in controllers:
+        original_alive = controller.b.alive
+
+        def alive(check=original_alive):
+            Q.require(not cancelled.is_set(), "test worker cancelled")
+            Q.require(time.monotonic() < deadline, "test worker deadline")
+            check()
+
+        controller.b.alive = alive
+
+    def complete(controller):
         assert controller.pre_start(99) == "normal-start-authorized"
         # No bootstrap child survives ExecStartPre.
         assert controller.b.events == ["start", "stop"] and not controller.b.boot
@@ -167,6 +191,13 @@ def test_three_original_cold_starts_repair_before_serial_normal_handover(cluster
         controller.b.normal()
         controller.post_start()
         return controller.record["phase"]
+
+    def run(controller):
+        try:
+            return complete(controller)
+        except BaseException:
+            cancelled.set()
+            raise
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         assert list(pool.map(run, controllers)) == ["normal"] * 3
@@ -1746,3 +1777,87 @@ def test_environment_parser_uses_only_verified_bytes(tmp_path, monkeypatch):
     env = launches[0]
     assert env["K3S_NODE_NAME"] == "verified" and "K3S_CLUSTER_RESET" not in env
     assert reads == [path]
+
+
+@pytest.mark.parametrize("active", [set(), {"1"}])
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("endpoint", "status"),
+        ("endpoint", "health"),
+        ("member", "list"),
+        ("get", Q.KEY),
+        ("txn",),
+        ("member", "update", "1", "--peer-urls=x"),
+    ],
+)
+def test_simulated_availability_is_typed_only_for_reads(cluster, active, args):
+    c, controllers = cluster
+    c.active.update(active)
+    with pytest.raises(Q.Stop) as caught:
+        controllers[0].b.etcd(controllers[0].r.host, *args)
+    assert isinstance(caught.value, S.ReadUnavailable) is (
+        args[0] not in ("txn",) and args[:2] != ("member", "update")
+    )
+    assert not c.updates and not c.patches
+
+
+@pytest.mark.parametrize("message", ["endpoint identity changed", "invalid schema"])
+def test_simulated_read_invariants_remain_terminal(cluster, monkeypatch, message):
+    c, controllers = cluster
+    c.active.update(("1", "2", "3"))
+
+    def fail(*args, **kwargs):
+        raise Q.Stop(message)
+
+    monkeypatch.setattr(D.Backend, "etcd", fail)
+    with pytest.raises(Q.Stop, match=message) as caught:
+        controllers[0].r.prove_transport({"ip": c.ips["1"]})
+    assert not isinstance(caught.value, S.ReadUnavailable)
+
+
+@pytest.mark.parametrize("version", sorted(Q.VERSIONS))
+def test_first_voter_polls_before_other_bootstrap_children_start(cluster, monkeypatch, version):
+    observed = threading.Event()
+    original_start, original_etcd = Backend.start, Backend.etcd
+
+    def start(backend, fd):
+        if backend.mid != "1":
+            assert observed.wait(5), "first voter never observed typed availability"
+        return original_start(backend, fd)
+
+    def etcd(backend, host, *args, **kwargs):
+        try:
+            return original_etcd(backend, host, *args, **kwargs)
+        except S.ReadUnavailable:
+            if backend.mid == "1":
+                observed.set()
+            raise
+
+    monkeypatch.setattr(Backend, "start", start)
+    monkeypatch.setattr(Backend, "etcd", etcd)
+    test_three_original_cold_starts_repair_before_serial_normal_handover(cluster, version)
+    assert observed.is_set()
+
+
+def test_cold_fixture_worker_failure_cancels_other_workers(cluster, monkeypatch):
+    _, controllers = cluster
+
+    def fail(fd):
+        raise Q.Stop("injected worker failure")
+
+    monkeypatch.setattr(controllers[0].b, "start", fail)
+    before = time.monotonic()
+    with pytest.raises(Q.Stop, match="injected worker failure"):
+        test_three_original_cold_starts_repair_before_serial_normal_handover(
+            cluster, sorted(Q.VERSIONS)[0]
+        )
+    assert time.monotonic() - before < 5
+
+
+def test_unknown_get_key_is_not_typed_as_availability(cluster):
+    c, controllers = cluster
+    c.active.add("1")
+    with pytest.raises(Q.Stop) as caught:
+        controllers[0].b.etcd(controllers[0].r.host, "get", "/unsupported")
+    assert not isinstance(caught.value, S.ReadUnavailable)
