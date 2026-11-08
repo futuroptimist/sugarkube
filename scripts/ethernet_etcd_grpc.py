@@ -162,11 +162,16 @@ class Session:
             ) from exc
 
     def request(self, route, payload):
+        read_only = route in ("/v3/maintenance/status", "/v3/cluster/member/list", "/v3/kv/range")
         if self.failed:
             raise TransportError("authenticated session ended; no automatic reconnect")
         if self.relay.closed.is_set():
             self.close()
-            raise Unavailable("authenticated connection ended; no automatic reconnect")
+            if read_only:
+                raise Unavailable("authenticated connection ended; no automatic reconnect")
+            raise TransportError(
+                "authenticated connection ended; outcome may be unknown; no automatic reconnect"
+            )
         try:
             method = self.pool.FindMethodByName("etcdserverpb." + ROUTES[route])
             request = message_class(method.input_type, self.pool)()
@@ -192,9 +197,14 @@ class Session:
             self.close()
             if isinstance(exc, TransportError):
                 raise
-            if isinstance(exc, grpc.RpcError) and exc.code() in (
-                grpc.StatusCode.UNAVAILABLE,
-                grpc.StatusCode.DEADLINE_EXCEEDED,
+            if (
+                read_only
+                and isinstance(exc, grpc.RpcError)
+                and exc.code()
+                in (
+                    grpc.StatusCode.UNAVAILABLE,
+                    grpc.StatusCode.DEADLINE_EXCEEDED,
+                )
             ):
                 raise Unavailable("authenticated RPC temporarily unavailable") from exc
             raise TransportError("gRPC operation failed; outcome may be unknown") from exc

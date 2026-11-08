@@ -405,7 +405,17 @@ def test_offline_session_handshake_classification(monkeypatch, tmp_path, failure
         "failed",
     ],
 )
-def test_offline_authenticated_rpc_classification_never_replays(failure):
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/v3/maintenance/status",
+        "/v3/cluster/member/list",
+        "/v3/kv/range",
+        "/v3/cluster/member/update",
+        "/v3/kv/txn",
+    ],
+)
+def test_offline_authenticated_rpc_classification_never_replays(failure, route):
     import threading
     from types import SimpleNamespace
 
@@ -444,15 +454,21 @@ def test_offline_authenticated_rpc_classification_never_replays(failure):
     session.channel = SimpleNamespace(
         unary_unary=lambda *args, **kwargs: rpc, close=lambda: closed.append("channel")
     )
-    route = "unknown" if failure == "schema" else "/v3/maintenance/status"
+    read_only = route in ("/v3/maintenance/status", "/v3/cluster/member/list", "/v3/kv/range")
+    route = "unknown" if failure == "schema" else route
     with pytest.raises(TRANSPORT.TransportError) as caught:
         session.request(route, {})
     assert isinstance(caught.value, TRANSPORT.Unavailable) is (
-        failure in ("unavailable", "deadline", "eof")
+        read_only and failure in ("unavailable", "deadline", "eof")
     )
+    if not read_only and failure in ("unavailable", "deadline"):
+        assert str(caught.value) == "gRPC operation failed; outcome may be unknown"
+    if not read_only and failure == "eof":
+        assert "outcome may be unknown; no automatic reconnect" in str(caught.value)
     expected = 0 if failure in ("eof", "failed", "schema") else 1
     assert len(calls) == expected and session.failed
     with pytest.raises(TRANSPORT.TransportError) as repeated:
         session.request(route, {})
     assert not isinstance(repeated.value, TRANSPORT.Unavailable)
+    assert "no automatic reconnect" in str(repeated.value)
     assert len(calls) == expected
