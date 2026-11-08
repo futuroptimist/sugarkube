@@ -1160,3 +1160,36 @@ def test_regular_state_evidence_propagates_trust_refusal(tmp_path, monkeypatch):
     with pytest.raises(Q.Stop, match="untrusted owner"):
         S.state_evidence(path)
     assert path.read_text() == "{}"
+
+
+@pytest.mark.parametrize("kind", ["dangling", "live", "directory", "fifo"])
+@pytest.mark.parametrize("baseline", [True, False])
+def test_prestart_rejects_nonregular_membership_evidence_before_read_or_start(
+    cluster, monkeypatch, kind, baseline
+):
+    import os
+
+    c, (controller, *_) = cluster
+    path = controller.r.path
+    if baseline:
+        c.ips["1"] = controller.r.e["local_ipv4"]
+    target = path.parent / "membership-target"
+    target.write_text("preserve original evidence")
+    if kind in ("dangling", "live"):
+        path.symlink_to(target if kind == "live" else path.parent / "missing")
+    elif kind == "directory":
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+    before = path.lstat()
+
+    def unexpected_read():
+        pytest.fail("membership evidence must be admitted before previous()")
+
+    monkeypatch.setattr(controller.r, "previous", unexpected_read)
+    with pytest.raises(Q.Stop, match="nonregular state evidence"):
+        controller.pre_start(99)
+    assert path.lstat() == before
+    assert target.read_text() == "preserve original evidence"
+    assert not controller.path.exists()
+    assert controller.b.events == [] and c.patches == [] and c.updates == []

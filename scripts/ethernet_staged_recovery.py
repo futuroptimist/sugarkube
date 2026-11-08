@@ -686,6 +686,7 @@ class Coordinator:
         return True
 
     def pre_start(self, lease_fd):
+        state_evidence(self.r.path)
         state_evidence(self.r.address_journal)
         previous = self.r.previous()
         baseline = (
