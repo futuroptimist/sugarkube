@@ -45,7 +45,7 @@ jobs:
           version: 'v1.28.7'
       - name: Install dependencies
         run: |
-          uv pip install --system pytest pytest-cov coverage pyyaml
+          uv pip install --system pytest pytest-cov coverage pyyaml grpcio==1.84.0 protobuf==7.36.2 dnslib==0.9.26
           if [ -f requirements.txt ]; then uv pip install --system -r requirements.txt; fi
       - name: Install promtool
         env:

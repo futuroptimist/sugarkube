@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""One-shot, explicitly armed whole-host reboot into original-database recovery.
+
+No container/process kill, filesystem cleanup, policy change or forced reboot.
+The caller owns the normal recovery locks and invokes only pinned service tools.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+import time
+import uuid
+
+
+class Handoff:
+    def __init__(self, q, recovery, backend, opt_in, state):
+        self.q, self.r, self.b, self.opt, self.state = q, recovery, backend, opt_in, state
+        self.path = state / "reboot-handoff.json"
+        self.observation = state / "reboot-observation.json"
+        self.record = None
+        if self.path.exists() or self.path.is_symlink():
+            self.record = self.read_record(self.path)
+            q.require(
+                self.record["enrollment_sha256"] == opt_in["enrollment_sha256"]
+                and self.record["cluster_id"] == recovery.e["cluster_id"]
+                and self.record["member_id"] == recovery.local["id"]
+                and re.fullmatch("[0-9a-f]{32}", self.record["id"]),
+                "reboot handoff identity changed",
+            )
+
+    def read_record(self, path):
+        self.q.require(not path.is_symlink() and path.is_file(), "nonregular reboot evidence")
+        self.q.trusted_file(path)
+        return json.loads(path.read_text())
+
+    def save(self, phase, **extra):
+        self.record.update(phase=phase, **extra)
+        self.q.atomic_json(self.path, self.record)
+
+    def clean_previous(self, baseline):
+        incident = self.r.previous()
+        self.q.require(
+            not incident or (incident["phase"] == "complete" and incident["ip"] == baseline),
+            "unfinished membership/workload recovery forbids reboot",
+        )
+        staged = self.state / "staged.json"
+        if staged.exists() or staged.is_symlink():
+            previous = self.read_record(staged)
+            self.q.require(
+                previous["phase"] == "normal"
+                and incident
+                and incident["phase"] == "complete"
+                and previous["ip"] == baseline
+                and previous["member_id"] == self.r.local["id"]
+                and previous["cluster_id"] == self.r.e["cluster_id"],
+                "unfinished staged lifecycle forbids reboot",
+            )
+        if self.r.address_journal.exists() or self.r.address_journal.is_symlink():
+            previous = self.read_record(self.r.address_journal)
+            self.q.require(
+                previous["phase"] == "verified"
+                and previous["ip"] == baseline
+                and previous["member_id"] == self.r.local["id"]
+                and previous["cluster_id"] == self.r.e["cluster_id"]
+                and previous["node_uid"] == self.r.local["node_uid"],
+                "unfinished Node address mutation forbids reboot",
+            )
+
+    def before_start(self):
+        if not self.record:
+            return
+        if self.record["phase"] == "complete":
+            return
+        self.q.require(
+            self.record["phase"]
+            in ("reboot-dispatch-intent", "reboot-requested", "cold-authorized"),
+            "unknown reboot phase",
+        )
+        boot = self.b.boot_id()
+        self.q.require(
+            boot != self.record["origin_boot_id"],
+            "reboot handoff still on original boot; never retry reboot",
+        )
+        self.q.require(self.r.local_guard() == self.record["ip"], "address changed across reboot")
+        if self.record["phase"] == "cold-authorized":
+            self.q.require(
+                boot == self.record["recovery_boot_id"], "another reboot interrupted cold recovery"
+            )
+            self.q.require(
+                "staged_id" not in self.record,
+                "cold handoff already consumed; preserve staged start outcome",
+            )
+            self.clean_previous(self.record["old_ip"])
+            self.b.quiet()
+            return
+        self.clean_previous(self.record["old_ip"])
+        self.b.quiet()
+        self.save("cold-authorized", recovery_boot_id=boot)
+
+    def bind_staged(self, staged):
+        if self.record is None or self.record["phase"] == "complete":
+            return
+        self.q.require(
+            self.record is not None
+            and self.record["phase"] == "cold-authorized"
+            and self.b.boot_id() == self.record["recovery_boot_id"]
+            and staged["ip"] == self.record["ip"]
+            and staged["member_id"] == self.record["member_id"]
+            and staged["cluster_id"] == self.record["cluster_id"]
+            and ("staged_id" not in self.record or self.record["staged_id"] == staged["token"]),
+            "reboot handoff cannot bind this staged incident",
+        )
+        self.save(
+            "cold-authorized", staged_id=staged["token"], membership_id=staged["membership_id"]
+        )
+
+    def linked_stage(self):
+        path = self.state / "staged.json"
+        staged = self.read_record(path)
+        self.q.require(
+            staged["token"] == self.record.get("staged_id")
+            and staged["membership_id"] == self.record["membership_id"]
+            and staged["phase"] == "normal"
+            and staged["ip"] == self.record["ip"]
+            and staged["member_id"] == self.record["member_id"]
+            and staged["cluster_id"] == self.record["cluster_id"],
+            "linked staged recovery has not reached normal startup",
+        )
+        incident = self.r.previous()
+        self.q.require(
+            incident
+            and incident["token"] == self.record["membership_id"]
+            and incident["ip"] == self.record["ip"],
+            "membership incident differs from reboot handoff",
+        )
+
+    def ordinary_completion(self, ip, incident):
+        path = self.state / "staged.json"
+        if not (path.exists() or path.is_symlink()):
+            return False
+        staged = self.read_record(path)
+        self.q.require(
+            staged["phase"] == "normal"
+            and staged["member_id"] == self.r.local["id"]
+            and staged["cluster_id"] == self.r.e["cluster_id"]
+            and re.fullmatch("[0-9a-f]{32}", staged["token"])
+            and incident
+            and re.fullmatch("[0-9a-f]{32}", staged["membership_id"])
+            and staged["membership_id"] == incident["token"]
+            and incident["member_id"] == self.r.local["id"]
+            and incident["cluster_id"] == self.r.e["cluster_id"]
+            and incident["ip"] == staged["ip"]
+            and incident["phase"] in ("completion-pending", "verifying", "complete"),
+            "ordinary staged completion identity or phase differs",
+        )
+        address = self.read_record(self.r.address_journal)
+        self.q.require(
+            address["phase"] == "verified"
+            and address["member_id"] == self.r.local["id"]
+            and address["cluster_id"] == self.r.e["cluster_id"]
+            and address["node_uid"] == self.r.local["node_uid"]
+            and address["ip"] == staged["ip"],
+            "ordinary staged Node evidence differs",
+        )
+        return ip == staged["ip"]
+
+    def watch(self):
+        self.b.config()
+        boot, ip = self.b.boot_id(), self.b.address()
+        incident = self.r.previous()
+        baseline = (
+            incident["ip"]
+            if incident and incident["phase"] == "complete"
+            else self.r.e["local_ipv4"]
+        )
+        if self.record and self.record["phase"] != "complete":
+            self.q.require(
+                self.record["phase"] == "cold-authorized"
+                and boot == self.record["recovery_boot_id"]
+                and ip == self.record["ip"],
+                "reboot intent remains latched; no repeated request",
+            )
+            self.linked_stage()
+            result = self.r.post_start()
+            if self.r.previous()["phase"] == "complete":
+                self.save("complete")
+            return result
+        if self.ordinary_completion(ip, incident) or ip == baseline:
+            return self.r.post_start()
+        self.clean_previous(baseline)
+        self.q.require(self.r.e.get("armed") is True, "armed enrollment required for reboot")
+        network = self.b.running_network(ip, baseline)
+        state = self.b.reboot_admission()
+        now = time.monotonic()
+        observed = {}
+        if self.observation.exists() or self.observation.is_symlink():
+            observed = self.read_record(self.observation)
+            self.q.require(
+                isinstance(observed, dict)
+                and type(observed.get("monotonic")) in (int, float)
+                and math.isfinite(observed["monotonic"]),
+                "invalid debounce observation",
+            )
+        expected = {"boot_id": boot, "ip": ip, "old_ip": baseline, "network": network}
+        if (
+            any(observed.get(key) != value for key, value in expected.items())
+            or not 30 <= now - observed.get("monotonic", now) <= 300
+        ):
+            if (
+                any(observed.get(key) != value for key, value in expected.items())
+                or not 0 <= now - observed.get("monotonic", now) < 30
+            ):
+                self.q.atomic_json(self.observation, dict(expected, monotonic=now))
+            return "observing-running-address"
+        self.b.stable_address(ip)
+        final_state = self.b.reboot_admission()
+        # Both snapshots independently passed strict admission. Automatic restart
+        # attempts may change only InvocationID while our nonblocking leases
+        # prevent their staged pre-start from proceeding to K3s.
+        automatic = all(
+            snapshot.get("SubState") == "auto-restart" for snapshot in (state, final_state)
+        )
+
+        def comparable(snapshot):
+            return {
+                key: value
+                for key, value in snapshot.items()
+                if not (automatic and key == "InvocationID")
+            }
+
+        self.q.require(
+            self.b.running_network(ip, baseline) == network
+            and self.b.boot_id() == boot
+            and comparable(final_state) == comparable(state),
+            "host changed during reboot proof",
+        )
+        if self.record:
+            self.q.require(
+                self.record["phase"] == "complete" and self.record["origin_boot_id"] != boot,
+                "one reboot request per original boot; no loop",
+            )
+            archive = self.state / ("reboot-archive-" + self.record["id"] + ".json")
+            if archive.exists() or archive.is_symlink():
+                self.q.require(self.read_record(archive) == self.record, "reboot archive conflicts")
+            else:
+                self.q.atomic_json(archive, self.record)
+        self.record = dict(
+            id=uuid.uuid4().hex,
+            member_id=self.r.local["id"],
+            cluster_id=self.r.e["cluster_id"],
+            enrollment_sha256=self.opt["enrollment_sha256"],
+            origin_boot_id=boot,
+            ip=ip,
+            old_ip=baseline,
+            service=final_state,
+            network=network,
+        )
+        self.save("reboot-dispatch-intent")
+        # Return code only acknowledges the asynchronous request. On any timeout,
+        # interruption, or error the prior intent remains; do not retry or force.
+        self.b.request_reboot()
+        self.save("reboot-requested")
+        return "reboot-request-accepted; cold recovery not yet verified"

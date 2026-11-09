@@ -1,0 +1,20 @@
+# Managed by ethernet_quorum_recover.py
+[Unit]
+Description=Enrolled Ethernet mDNS resolver for K3s
+After=network-online.target
+Before=k3s.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+[Service]
+Type=notify
+NotifyAccess=main
+User=root
+UMask=0022
+RuntimeDirectory=sugarkube-ethernet-dns
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet_mdns_resolver.py --enrollment /etc/rancher/k3s/sugarkube-dns.json
+TimeoutStartSec=15
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=10

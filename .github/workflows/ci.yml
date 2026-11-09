@@ -19,7 +19,7 @@ jobs:
       - name: Install Python test deps
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov pyyaml
+          pip install pytest pytest-cov pyyaml grpcio==1.84.0 protobuf==7.36.2 dnslib==0.9.26
 
       - name: Install promtool
         env:
@@ -86,6 +86,19 @@ jobs:
                --bash-dont-parse-binary-dir \
                "$KCOV_OUT" \
                bats --recursive tests/bats
+
+      - name: Install pinned disposable etcd test binary
+        env:
+          ETCD_VERSION: 3.6.7
+          ETCD_SHA256: cf8af880c5a01ee5363cefa14a3e0cb7e5308dcf4ed17a6973099c9a7aee5a9a
+        run: |
+          test_dir="${RUNNER_TEMP}/sugarkube-etcd-test"
+          mkdir -p "${test_dir}"
+          archive="etcd-v${ETCD_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL "https://storage.googleapis.com/etcd/v${ETCD_VERSION}/${archive}" -o "${test_dir}/${archive}"
+          echo "${ETCD_SHA256}  ${test_dir}/${archive}" | sha256sum --check
+          tar -xzf "${test_dir}/${archive}" -C "${test_dir}" --strip-components=1 "etcd-v${ETCD_VERSION}-linux-amd64/etcd"
+          echo "SUGARKUBE_TEST_ETCD_BINARY=${test_dir}/etcd" >> "$GITHUB_ENV"
 
       - name: Run Python tests with coverage
         id: pytest
