@@ -740,7 +740,10 @@ def test_loaded_journal_and_conflicting_archive_are_guarded(cluster):
 def test_membership_read_unavailability_is_pollable(cluster, phase):
     _, (controller, *_) = cluster
     Q.atomic_json(
-        controller.r.path, dict(member_id="1", cluster_id="100", phase=phase, ip="10.0.0.11")
+        controller.r.path,
+        dict(
+            member_id="1", cluster_id="100", phase=phase, ip="10.0.0.11", mutation_dispatched=False
+        ),
     )
     assert controller.membership() is False
     controller.record = dict(ip="10.0.0.11", old_ip="10.0.0.1")
@@ -1277,7 +1280,10 @@ def test_prestart_rejects_nonregular_membership_evidence_before_read_or_start(
 @pytest.mark.parametrize("failure", ["availability", "identity", "address", "duplicate", "schema"])
 def test_membership_polls_only_typed_availability(cluster, monkeypatch, phase, failure):
     _, (controller, *_) = cluster
-    Q.atomic_json(controller.r.path, dict(member_id="1", cluster_id="100", phase=phase))
+    Q.atomic_json(
+        controller.r.path,
+        dict(member_id="1", cluster_id="100", phase=phase, mutation_dispatched=False),
+    )
     calls, retries = [], []
 
     def proof(*args, **kwargs):
@@ -1894,3 +1900,131 @@ def test_unknown_get_key_is_not_typed_as_availability(cluster):
     with pytest.raises(Q.Stop) as caught:
         controllers[0].b.etcd(controllers[0].r.host, "get", "/unsupported")
     assert not isinstance(caught.value, S.ReadUnavailable)
+
+
+@pytest.mark.parametrize("phase", ["transport-pending", "waiting-for-lock"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "second-read",
+        "post-acquire",
+        "unknown-acquire",
+        "write-latch",
+        "identity",
+        "schema",
+        "post-update",
+        "memory",
+        "disk",
+        "missing",
+        "flag-zero-memory",
+        "flag-zero-disk",
+        "flag-none",
+        "flag-missing",
+        "token",
+        "phase",
+        "symlink",
+        "untrusted",
+        "initial-flag",
+    ],
+)
+def test_reconcile_read_retry_requires_unchanged_prewrite_evidence(
+    cluster, monkeypatch, phase, failure
+):
+    c, (controller, *_) = cluster
+    r, b = controller.r, controller.b
+    c.active.update(("1", "2", "3"))
+    b.boot = True
+    for member in r.survivors:
+        c.members[member["id"]]["peerURLs"] = Q.dual_urls(member, c.ips[member["id"]])
+    incident = dict(
+        phase=phase,
+        mutation_dispatched=False,
+        ip=c.ips["1"],
+        member_id="1",
+        cluster_id=r.e["cluster_id"],
+        old_peer_urls=Q.dual_urls(r.local, r.e["local_ipv4"]),
+        **{"token": "a" * 32},
+    )
+    if failure == "initial-flag":
+        incident["mutation_dispatched"] = 0
+    Q.atomic_json(r.path, incident)
+    proof = r.prove_transport
+    calls, retries = [], []
+
+    def checked(record):
+        calls.append(True)
+        if len(calls) == (3 if failure == "post-acquire" else 2):
+            if failure in ("identity", "schema"):
+                raise Q.Stop(failure + " changed")
+            if failure in ("unknown-acquire", "post-update"):
+                return proof(record)
+            if failure == "write-latch":
+                b.write_failed = True
+            if failure == "memory":
+                record["old_peer_urls"].append("changed")
+            if failure == "disk":
+                changed = copy.deepcopy(incident)
+                changed["old_peer_urls"].append("changed")
+                Q.atomic_json(r.path, changed)
+            if failure == "missing":
+                monkeypatch.setattr(r, "previous", lambda: None)
+            if failure == "flag-zero-memory":
+                record["mutation_dispatched"] = 0
+            if failure in ("flag-zero-disk", "flag-none", "flag-missing", "token", "phase"):
+                changed = copy.deepcopy(incident)
+                if failure == "token":
+                    changed["token"] = "b" * 32
+                elif failure == "phase":
+                    changed["phase"] = "lock-acquire-intent"
+                elif failure == "flag-missing":
+                    del changed["mutation_dispatched"]
+                else:
+                    changed["mutation_dispatched"] = 0 if failure == "flag-zero-disk" else None
+                Q.atomic_json(r.path, changed)
+            if failure == "symlink":
+                r.path.unlink()
+                r.path.symlink_to(r.path.parent / "missing")
+            if failure == "untrusted":
+                monkeypatch.setattr(
+                    Q, "trusted_file", lambda path: Q.require(path != r.path, "untrusted evidence")
+                )
+            raise S.ReadUnavailable("injected read gap")
+        return proof(record)
+
+    original_membership = r.membership
+
+    def confirmation():
+        if failure == "post-update" and c.updates:
+            raise S.ReadUnavailable("confirmation read unavailable")
+        return original_membership()
+
+    monkeypatch.setattr(r, "membership", confirmation)
+    monkeypatch.setattr(r, "prove_transport", checked)
+    monkeypatch.setattr(b, "retry_reads", lambda: retries.append(True))
+    if failure == "unknown-acquire":
+        c.failure = "acquire"
+    if failure == "second-read":
+        assert controller.membership() is False
+        assert retries == [True] and r.previous() == incident
+        assert not c.updates and c.owner is None and b.boot
+        assert controller.membership() is True
+        assert c.updates == ["1"] and r.previous()["phase"] == "completion-pending"
+        assert b.boot and b.events == []
+    else:
+        with pytest.raises(Q.Stop):
+            controller.membership()
+        assert retries == [] and b.events == []
+        if failure == "post-update":
+            assert c.updates == ["1"]
+            assert r.previous()["phase"] == "membership-intent"
+            assert r.previous()["mutation_dispatched"] is True
+            with pytest.raises(Q.Stop, match="membership outcome unresolved"):
+                controller.membership()
+            assert c.updates == ["1"] and retries == []
+        else:
+            assert c.updates == []
+        if failure in ("post-acquire", "unknown-acquire"):
+            assert r.previous()["phase"] == (
+                "lock-owned" if failure == "post-acquire" else "lock-acquire-intent"
+            )
+            assert c.owner == incident["token"]

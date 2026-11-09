@@ -8,6 +8,7 @@ workloads, edit databases, bypass admission, or retry uncertain mutations.
 from __future__ import annotations
 
 import argparse
+import copy
 import fcntl
 import importlib.util
 import json
@@ -663,12 +664,26 @@ class Coordinator:
         if incident["phase"] in ("transport-pending", "waiting-for-lock"):
             # Only failed READ proofs can be polled. reconcile persists intent before
             # every write, so a mutation exception escapes and is never replayed.
+            before = copy.deepcopy(incident)
             try:
                 self.r.prove_transport(incident)
+                if self.r.reconcile(incident) == "waiting-for-lock":
+                    return False
             except ReadUnavailable:
+                # reconcile repeats the proof before acquiring ownership. Only
+                # that unchanged pre-write state can safely start another read.
+                persisted = self.r.previous()
+                if (
+                    before.get("mutation_dispatched") is not False
+                    or incident.get("mutation_dispatched") is not False
+                    or not isinstance(persisted, dict)
+                    or persisted.get("mutation_dispatched") is not False
+                    or incident != before
+                    or persisted != before
+                    or getattr(self.b, "write_failed", False)
+                ):
+                    raise
                 self.b.retry_reads()
-                return False
-            if self.r.reconcile(incident) == "waiting-for-lock":
                 return False
         Q.require(
             self.r.previous()["phase"] == "completion-pending", "membership outcome unresolved"
