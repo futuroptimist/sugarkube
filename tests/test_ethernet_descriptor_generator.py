@@ -64,6 +64,39 @@ def test_generation_hashes_every_stage_before_writing(tmp_path, monkeypatch, dam
         assert destination.read_bytes() == result
 
 
+@pytest.mark.parametrize("source_hash_matches", [True, False])
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_missing_descriptor_block_fails_before_writing(
+    tmp_path, monkeypatch, source_hash_matches, existing_output
+):
+    raw = b"package mvccpb\n"
+    (tmp_path / "kv.go").write_bytes(raw)
+    manifest = {
+        "files": {
+            "kv": {
+                "source": "kv.go",
+                "go_sha256": hashlib.sha256(raw).hexdigest() if source_hash_matches else "0" * 64,
+                "original_descriptor_sha256": "0" * 64,
+            }
+        },
+        "descriptor_sha256": "0" * 64,
+    }
+    vendor = tmp_path / "vendor/etcd"
+    vendor.mkdir(parents=True)
+    (vendor / "descriptor.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(G, "__file__", str(tmp_path / "generator.py"))
+    destination = tmp_path / "result.desc"
+    if existing_output:
+        destination.write_bytes(b"previous reviewed artifact")
+    error = "descriptor block not found" if source_hash_matches else "source hash mismatch"
+    with pytest.raises(ValueError, match=f"^{error}: kv[.]go$"):
+        G.generate(tmp_path, destination)
+    if existing_output:
+        assert destination.read_bytes() == b"previous reviewed artifact"
+    else:
+        assert not destination.exists()
+
+
 def test_cli_missing_source_does_not_publish(tmp_path, monkeypatch):
     destination = tmp_path / "result.desc"
     monkeypatch.setattr(

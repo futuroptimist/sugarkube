@@ -26,7 +26,11 @@ def generate(source, destination):
         if hashlib.sha256(raw).hexdigest() != entry["go_sha256"]:
             raise ValueError("source hash mismatch: " + entry["source"])
         block = re.search(r"var fileDescriptor_\w+ = \[\]byte\{(.*?)\n\}", raw.decode(), re.S)
-        wire = gzip.decompress(bytes(int(x, 16) for x in re.findall(r"0x([0-9a-f]{2})", block[1])))
+        if block is None:
+            raise ValueError("descriptor block not found: " + entry["source"])
+        wire = gzip.decompress(
+            bytes(int(x, 16) for x in re.findall(r"0x([0-9a-f]{2})", block.group(1)))
+        )
         if hashlib.sha256(wire).hexdigest() != entry["original_descriptor_sha256"]:
             raise ValueError("original descriptor hash mismatch")
         descriptor = descriptor_pb2.FileDescriptorProto.FromString(wire)
