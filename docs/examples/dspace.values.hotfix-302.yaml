@@ -1,0 +1,4 @@
+# Candidate-specific v3.0.2 settings; append after the staging values overlay.
+runtimeVersion: v3.0.2+4790074
+chat:
+  defaultProvider: openai

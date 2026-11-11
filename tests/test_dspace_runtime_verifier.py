@@ -1,7 +1,7 @@
-from copy import deepcopy
 import json
 import subprocess
 from argparse import Namespace
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -142,10 +142,12 @@ def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"
     base.write_text(
-        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://old.invalid\n- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: old\n"
+        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://old.invalid\n"
+        "- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: old\n"
     )
     overlay.write_text(
-        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://token.example\n- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: current-model\n"
+        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://token.example\n"
+        "- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: current-model\n"
     )
     assert verifier.values_expectations([base, overlay]) == (
         "https://token.example",
@@ -378,7 +380,7 @@ def _verify_setup(
                     "chat_stdout",
                     (
                         hotfix_runner_proof()
-                        if coordinates == verifier.HOTFIX_302_COORDINATES
+                        if coordinates in verifier.HOTFIX_IDENTITY_COORDINATES
                         else SENTINEL
                     ),
                 )
@@ -391,7 +393,7 @@ def _verify_setup(
         manifest_path = legacy_310_manifest(tmp_path)
     elif legacy:
         manifest_path = recovery_manifest(tmp_path, **(coordinates or {}))
-        if coordinates == verifier.HOTFIX_302_COORDINATES:
+        if coordinates in verifier.HOTFIX_IDENTITY_COORDINATES:
             value = json.loads(manifest_path.read_text())
             value["environment"] = "staging"
             manifest_path.write_text(json.dumps(value))
@@ -2045,9 +2047,10 @@ def test_tag_only_runtime_exception_is_limited_to_exact_recovery_preflight(
             verifier.verify(args)
 
 
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
 @pytest.mark.parametrize("field", list(verifier.HOTFIX_302_COORDINATES))
-def test_hotfix_coordinate_drift_never_selects_legacy(field: str) -> None:
-    value = dict(verifier.HOTFIX_302_COORDINATES)
+def test_hotfix_coordinate_drift_never_selects_legacy(coordinates, field: str) -> None:
+    value = dict(coordinates)
     value[field] = "drift"
     assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
 
@@ -2061,13 +2064,14 @@ def test_hotfix_coordinate_drift_never_selects_legacy(field: str) -> None:
         ({"direct_meta": {"dspace-2": '{"gitSha":"wrong"}'}}, "direct identity"),
     ],
 )
-def test_hotfix_build_meta_contract(monkeypatch, tmp_path, overrides, failure) -> None:
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+def test_hotfix_build_meta_contract(monkeypatch, tmp_path, overrides, failure, coordinates) -> None:
     args, seen = _verify_setup(
         monkeypatch,
         tmp_path,
         legacy=True,
         provider="openai",
-        coordinates=verifier.HOTFIX_302_COORDINATES,
+        coordinates=coordinates,
         overrides=overrides,
     )
     if failure:
@@ -2119,15 +2123,16 @@ def hotfix_runner_proof(**changes: object) -> str:
         ({"chat_returncode": 2, "chat_stdout": hotfix_runner_proof()}, "provider/chat smoke"),
     ],
 )
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
 def test_hotfix_rejects_health_drift_and_missing_or_invalid_artifact_proof(
-    monkeypatch, tmp_path, overrides, category
+    monkeypatch, tmp_path, overrides, category, coordinates
 ):
     args, _ = _verify_setup(
         monkeypatch,
         tmp_path,
         legacy=True,
         provider="openai",
-        coordinates=verifier.HOTFIX_302_COORDINATES,
+        coordinates=coordinates,
         overrides=overrides,
     )
     with pytest.raises(verifier.VerificationError, match=category):

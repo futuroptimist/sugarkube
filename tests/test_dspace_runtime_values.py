@@ -6,11 +6,13 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.app_config import load_config  # noqa: E402
 from scripts.app_chart import contains_exact_scalar, merged_values_document  # noqa: E402
+from scripts.app_config import load_config  # noqa: E402
 from scripts.observability_app_metrics import load_config as load_metrics_config  # noqa: E402
 
 OVERLAYS = {
@@ -190,8 +192,6 @@ def test_dspace_staging_values_exactly_match_authenticated_metrics_inventory() -
 
 
 def test_dspace_prod_values_enable_authenticated_metrics_without_a_credential() -> None:
-    text = OVERLAYS["prod"].read_text(encoding="utf-8")
-
     values = merged_values_document((str(OVERLAYS["prod"]),))
     assert values["metrics"] == {
         "enabled": True,
@@ -217,3 +217,24 @@ def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
             "dspace.values.staging.yaml",
             "dspace.values.prod.yaml",
         }
+
+
+def test_hotfix_candidate_config_keeps_explicit_runtime_and_provider() -> None:
+    config_path = REPO_ROOT / "docs/examples/apps/dspace-hotfix-302.env"
+    config = load_config("dspace", "staging", str(config_path))
+    document = merged_values_document(tuple(config["SUGARKUBE_VALUES"].split(",")))
+    assert config["SUGARKUBE_VERSION"] == "3.1.3"
+    assert document["runtimeVersion"] == "v3.0.2+4790074"
+    assert document["chat"]["defaultProvider"] == "openai"
+    assert document["environment"] == "staging"
+    assert document["ingress"]["host"] == "staging.democratized.space"
+    assert document["metrics"]["auth"]["existingSecret"] == "dspace-staging-metrics-token"
+    assert not any(entry["name"] == "DSPACE_VERSION" for entry in document["env"])
+
+
+def test_hotfix_candidate_config_cannot_select_production() -> None:
+    from scripts.app_config import AppConfigError
+
+    config_path = REPO_ROOT / "docs/examples/apps/dspace-hotfix-302.env"
+    with pytest.raises(AppConfigError, match="missing SUGARKUBE_VALUES_PROD"):
+        load_config("dspace", "prod", str(config_path))
