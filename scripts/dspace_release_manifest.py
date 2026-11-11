@@ -580,29 +580,124 @@ def _descriptor(oras: str, tagged_ref: str, runner) -> str:
     return digest
 
 
+def _image_descriptors(manifests: list[Any]) -> tuple[set[str], dict[str, str]]:
+    """Recognize only bound BuildKit attestations as non-runnable index members."""
+    runnable: set[str] = set()
+    attestations: dict[str, str] = {}
+    seen: set[str] = set()
+    for descriptor in manifests:
+        digest = descriptor.get("digest") if isinstance(descriptor, dict) else None
+        if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+            raise ManifestError("image index contains a non-canonical platform digest")
+        if digest in seen:
+            raise ManifestError("image index contains a duplicate manifest digest")
+        seen.add(digest)
+        platform = descriptor.get("platform")
+        annotations = descriptor.get("annotations", {})
+        if not isinstance(annotations, dict):
+            raise ManifestError("image index contains invalid descriptor annotations")
+        reference_type = "vnd.docker.reference.type"
+        reference_digest = "vnd.docker.reference.digest"
+        if reference_type in annotations or reference_digest in annotations:
+            target = annotations.get(reference_digest)
+            if (
+                descriptor.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+                or platform != {"os": "unknown", "architecture": "unknown"}
+                or annotations.get(reference_type) != "attestation-manifest"
+                or not isinstance(target, str)
+                or not DIGEST_RE.fullmatch(target)
+            ):
+                raise ManifestError(
+                    "image index contains an invalid BuildKit attestation descriptor"
+                )
+            attestations[digest] = target
+        else:
+            if not isinstance(platform, dict) or any(
+                not isinstance(platform.get(field), str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", platform[field])
+                or platform[field] == "unknown"
+                for field in ("os", "architecture")
+            ):
+                raise ManifestError("image index contains an unrecognized non-runnable platform")
+            runnable.add(digest)
+    if not runnable:
+        raise ManifestError("image index must contain at least one runnable platform")
+    if any(target not in runnable for target in attestations.values()):
+        raise ManifestError("BuildKit attestation must reference a runnable manifest in this index")
+    return runnable, attestations
+
+
+def _validate_buildkit_attestation(
+    image_manifest: dict[str, Any], config: dict[str, Any], target_digest: str
+) -> None:
+    """Exclude metadata only after confirming the observed non-runnable BuildKit shape."""
+    if "artifactType" in image_manifest and (
+        image_manifest["artifactType"] != "application/vnd.docker.attestation.manifest.v1+json"
+    ):
+        raise ManifestError("invalid BuildKit attestation artifact type")
+    if "subject" in image_manifest:
+        subject = image_manifest["subject"]
+        if (
+            not isinstance(subject, dict)
+            or subject.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+            or subject.get("digest") != target_digest
+        ):
+            raise ManifestError("BuildKit attestation subject does not match its index reference")
+    layers = image_manifest.get("layers")
+    if (
+        image_manifest.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+        or image_manifest["config"].get("mediaType")
+        not in {"application/vnd.oci.empty.v1+json", "application/vnd.oci.image.config.v1+json"}
+        or config != {}
+        or not isinstance(layers, list)
+        or not layers
+    ):
+        raise ManifestError("invalid non-runnable BuildKit attestation manifest or config")
+    for layer in layers:
+        if (
+            not isinstance(layer, dict)
+            or layer.get("mediaType") != "application/vnd.in-toto+json"
+            or not isinstance(layer.get("digest"), str)
+            or not DIGEST_RE.fullmatch(layer["digest"])
+        ):
+            raise ManifestError("invalid BuildKit attestation layer descriptor")
+
+
 def _image_evidence(oras: str, repository: str, tag: str, runner) -> tuple[str, list[str]]:
     digest = _descriptor(oras, f"{repository}:{tag}", runner)
     index = _json_run(runner, [oras, "manifest", "fetch", f"{repository}@{digest}"])
     manifests = index.get("manifests")
     if not isinstance(manifests, list) or not manifests:
         raise ManifestError("image artifact must be an OCI image index with platform manifests")
+    _, attestations = _image_descriptors(manifests)
     revisions = []
     for platform in manifests:
-        platform_digest = platform.get("digest") if isinstance(platform, dict) else None
-        if not isinstance(platform_digest, str) or not DIGEST_RE.fullmatch(platform_digest):
-            raise ManifestError("image index contains a non-canonical platform digest")
+        platform_digest = platform["digest"]
         image_manifest = _json_run(
             runner, [oras, "manifest", "fetch", f"{repository}@{platform_digest}"]
         )
-        config_digest = image_manifest.get("config", {}).get("digest")
+        config_descriptor = image_manifest.get("config")
+        config_digest = (
+            config_descriptor.get("digest") if isinstance(config_descriptor, dict) else None
+        )
         if not isinstance(config_digest, str) or not DIGEST_RE.fullmatch(config_digest):
             raise ManifestError("image manifest lacks a canonical config digest")
         config = _json_run(
             runner, [oras, "blob", "fetch", "--output", "-", f"{repository}@{config_digest}"]
         )
-        revision = _revision(config)
+        if platform_digest in attestations:
+            _validate_buildkit_attestation(image_manifest, config, attestations[platform_digest])
+            continue
+        try:
+            revision = _revision(config)
+        except (AttributeError, TypeError):
+            revision = None
         if not isinstance(revision, str):
             raise ManifestError("image config lacks OCI revision label")
+        if any(
+            config.get(field) != platform["platform"][field] for field in ("os", "architecture")
+        ):
+            raise ManifestError("image config platform does not match its index descriptor")
         revisions.append(revision)
     return digest, revisions
 
@@ -859,7 +954,9 @@ def finalize(
         {
             "check": "selectedCoordinates",
             "passed": True,
-            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+            "details": (
+                f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}"
+            ),
         },
         {
             "check": "clusterEnvironment",
@@ -984,7 +1081,9 @@ def verify_helm_stored_values(
     return {
         "check": "helmStoredValues",
         "passed": True,
-        "details": "stored image coordinates, pull policy, and environment isolation matched approval",
+        "details": (
+            "stored image coordinates, pull policy, and environment isolation matched approval"
+        ),
     }
 
 

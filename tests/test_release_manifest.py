@@ -230,7 +230,9 @@ def oras_runner(*, image_revision: str = SHA, chart_revision: str = SHA):
             "layers": [],
         },
         ("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"): {
-            "config": {"Labels": {manifest.REVISION_ANNOTATION: image_revision}}
+            "os": "linux",
+            "architecture": "amd64",
+            "config": {"Labels": {manifest.REVISION_ANNOTATION: image_revision}},
         },
         ("manifest", "fetch", "--descriptor", f"{manifest.CHART_REF}:3.2.0"): {
             "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -252,6 +254,7 @@ def oras_runner(*, image_revision: str = SHA, chart_revision: str = SHA):
         return json.dumps(responses[tuple(command[1:])])
 
     run.calls = calls
+    run.responses = responses
     return run
 
 
@@ -731,9 +734,7 @@ def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     stored["env"] = [
         {
             "name": "METRICS_TOKEN",
-            "valueFrom": {
-                "secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}
-            },
+            "valueFrom": {"secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}},
         }
     ]
     assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
@@ -2100,3 +2101,327 @@ def test_invalid_hotfix_or_mutable_tag_fails_closed(tag: str) -> None:
     value["imageTag"] = tag
     with pytest.raises(manifest.ManifestError, match="imageTag"):
         manifest.candidate(value, "staging", "openai", "2026-11-01T00:00:00Z", "test")
+
+
+ARM_PLATFORM_DIGEST = "sha256:" + "6" * 64
+ARM_CONFIG_DIGEST = "sha256:" + "7" * 64
+ATTESTATION_DIGESTS = ["sha256:" + "8" * 64, "sha256:" + "9" * 64]
+EMPTY_CONFIG_DIGEST = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+OCI_MANIFEST_TYPE = "application/vnd.oci.image.manifest.v1+json"
+OCI_CONFIG_TYPE = "application/vnd.oci.image.config.v1+json"
+OCI_EMPTY_CONFIG_TYPE = "application/vnd.oci.empty.v1+json"
+
+
+def attestation_runner():
+    """Model BuildKit's two runnable images plus two empty-config attestations."""
+    runner = oras_runner()
+    responses = runner.responses
+    descriptors = responses[("manifest", "fetch", f"{manifest.IMAGE_REF}@{DIGEST}")]["manifests"]
+    descriptors[0]["mediaType"] = OCI_MANIFEST_TYPE
+    descriptors.append(
+        {
+            "digest": ARM_PLATFORM_DIGEST,
+            "mediaType": OCI_MANIFEST_TYPE,
+            "platform": {"os": "linux", "architecture": "arm64"},
+        }
+    )
+    responses[("manifest", "fetch", f"{manifest.IMAGE_REF}@{ARM_PLATFORM_DIGEST}")] = {
+        "schemaVersion": 2,
+        "config": {"digest": ARM_CONFIG_DIGEST},
+        "layers": [],
+    }
+    responses[("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{ARM_CONFIG_DIGEST}")] = {
+        "os": "linux",
+        "architecture": "arm64",
+        "config": {"Labels": {manifest.REVISION_ANNOTATION: SHA}},
+    }
+    responses[("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{EMPTY_CONFIG_DIGEST}")] = (
+        {}
+    )
+    for digest, target in zip(ATTESTATION_DIGESTS, (PLATFORM_DIGEST, ARM_PLATFORM_DIGEST)):
+        descriptors.append(
+            {
+                "digest": digest,
+                "mediaType": OCI_MANIFEST_TYPE,
+                "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {
+                    "vnd.docker.reference.type": "attestation-manifest",
+                    "vnd.docker.reference.digest": target,
+                },
+            }
+        )
+        responses[("manifest", "fetch", f"{manifest.IMAGE_REF}@{digest}")] = {
+            "schemaVersion": 2,
+            "mediaType": OCI_MANIFEST_TYPE,
+            "artifactType": "application/vnd.docker.attestation.manifest.v1+json",
+            "subject": {"mediaType": OCI_MANIFEST_TYPE, "digest": target, "size": 3714},
+            "config": {
+                "mediaType": OCI_EMPTY_CONFIG_TYPE,
+                "digest": EMPTY_CONFIG_DIGEST,
+                "size": 2,
+                "data": "e30=",
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.in-toto+json",
+                    "digest": "sha256:" + "a" * 64,
+                    "annotations": {"in-toto.io/predicate-type": "https://slsa.dev/provenance/v1"},
+                }
+            ],
+        }
+    return runner, descriptors
+
+
+@pytest.mark.parametrize("order", [(0, 1, 2, 3), (2, 3, 0, 1), (3, 1, 2, 0)])
+def test_preflight_distinguishes_bound_buildkit_attestations(order) -> None:
+    runner, descriptors = attestation_runner()
+    descriptors[:] = [descriptors[index] for index in order]
+    results = manifest.preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+    )
+    assert [item["check"] for item in results] == [
+        "imageDigest",
+        "chartDigest",
+        "chartSourceRevision",
+        "imagePlatformSourceRevision[0]",
+        "imagePlatformSourceRevision[1]",
+    ]
+    assert all(item["passed"] for item in results)
+    for digest in (PLATFORM_DIGEST, ARM_PLATFORM_DIGEST, *ATTESTATION_DIGESTS):
+        assert ["oras", "manifest", "fetch", f"{manifest.IMAGE_REF}@{digest}"] in runner.calls
+    # Metadata layers are not executable images and are not used as provenance proof.
+    assert not any(call[-1].endswith("a" * 64) for call in runner.calls)
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda items: items.append("not-a-descriptor"), "platform digest"),
+        (lambda items: items[2].update(digest="not-a-digest"), "platform digest"),
+        (lambda items: items.append(dict(items[0])), "duplicate manifest digest"),
+        (lambda items: items[0].pop("platform"), "non-runnable platform"),
+        (lambda items: items[0].update(platform=None), "non-runnable platform"),
+        (lambda items: items[0].update(platform=[]), "non-runnable platform"),
+        (lambda items: items[0]["platform"].pop("architecture"), "non-runnable platform"),
+        (lambda items: items[0]["platform"].update(os="unknown"), "non-runnable platform"),
+        (lambda items: items[0]["platform"].update(architecture=" "), "non-runnable platform"),
+        (lambda items: items[0]["platform"].update(os="unknown "), "non-runnable platform"),
+        (lambda items: items[0]["platform"].update(architecture=42), "non-runnable platform"),
+        (lambda items: items[2].update(annotations=[]), "descriptor annotations"),
+        (lambda items: items[2].pop("annotations"), "non-runnable platform"),
+        (
+            lambda items: items[2]["annotations"].pop("vnd.docker.reference.type"),
+            "attestation descriptor",
+        ),
+        (
+            lambda items: items[2]["annotations"].pop("vnd.docker.reference.digest"),
+            "attestation descriptor",
+        ),
+        (
+            lambda items: items[2]["annotations"].update({"vnd.docker.reference.type": "image"}),
+            "attestation descriptor",
+        ),
+        (
+            lambda items: items[2]["annotations"].update({"vnd.docker.reference.digest": "bad"}),
+            "attestation descriptor",
+        ),
+        (
+            lambda items: items[2]["annotations"].update({"vnd.docker.reference.digest": 42}),
+            "attestation descriptor",
+        ),
+        (
+            lambda items: items[2]["annotations"].update(
+                {"vnd.docker.reference.digest": CHART_DIGEST}
+            ),
+            "reference a runnable",
+        ),
+        (
+            lambda items: items[2]["annotations"].update(
+                {"vnd.docker.reference.digest": ATTESTATION_DIGESTS[1]}
+            ),
+            "reference a runnable",
+        ),
+        (
+            lambda items: items[2]["annotations"].update(
+                {"vnd.docker.reference.digest": ATTESTATION_DIGESTS[0]}
+            ),
+            "reference a runnable",
+        ),
+        (
+            lambda items: items[2].update(platform={"os": "linux", "architecture": "amd64"}),
+            "attestation descriptor",
+        ),
+        (lambda items: items[2].update(platform={"os": "unknown"}), "attestation descriptor"),
+        (lambda items: items[2].update(mediaType=OCI_CONFIG_TYPE), "attestation descriptor"),
+        (lambda items: items.__delitem__(slice(0, 2)), "at least one runnable"),
+    ],
+)
+def test_preflight_rejects_ambiguous_or_unbound_image_descriptors(change, message) -> None:
+    runner, descriptors = attestation_runner()
+    change(descriptors)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+    # Classification must complete before trusting any member's metadata.
+    assert len(runner.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda value: value.pop("mediaType"), "attestation manifest or config"),
+        (lambda value: value.update(mediaType=OCI_CONFIG_TYPE), "attestation manifest or config"),
+        (lambda value: value["config"].pop("mediaType"), "attestation manifest or config"),
+        (
+            lambda value: value["config"].update(mediaType=OCI_MANIFEST_TYPE),
+            "attestation manifest or config",
+        ),
+        (lambda value: value.update(config=None), "config digest"),
+        (lambda value: value["config"].update(digest="bad"), "config digest"),
+        (lambda value: value.pop("layers"), "attestation manifest or config"),
+        (lambda value: value.update(layers=[]), "attestation manifest or config"),
+        (lambda value: value.update(layers={}), "attestation manifest or config"),
+        (lambda value: value.update(layers=[None]), "attestation layer descriptor"),
+        (
+            lambda value: value["layers"][0].update(
+                mediaType="application/vnd.oci.image.layer.v1.tar+gzip"
+            ),
+            "attestation layer descriptor",
+        ),
+        (lambda value: value["layers"][0].update(digest="bad"), "attestation layer descriptor"),
+        (lambda value: value["layers"][0].update(digest=None), "attestation layer descriptor"),
+    ],
+)
+def test_preflight_does_not_skip_malformed_attestation_payloads(change, message) -> None:
+    runner, _ = attestation_runner()
+    value = runner.responses[
+        ("manifest", "fetch", f"{manifest.IMAGE_REF}@{ATTESTATION_DIGESTS[0]}")
+    ]
+    change(value)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"os": "linux"},
+        {"architecture": "arm64"},
+        {"rootfs": {}},
+        {"config": {"Labels": {manifest.REVISION_ANNOTATION: SHA}}},
+    ],
+)
+def test_preflight_does_not_hide_runnable_metadata_as_attestation(config) -> None:
+    runner, _ = attestation_runner()
+    runner.responses[
+        ("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{EMPTY_CONFIG_DIGEST}")
+    ] = config
+    with pytest.raises(manifest.ManifestError, match="attestation manifest or config"):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+
+
+@pytest.mark.parametrize("config_digest", [IMAGE_CONFIG_DIGEST, ARM_CONFIG_DIGEST])
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda value: value["config"].update(Labels={}), "revision label"),
+        (lambda value: value.update(config=[]), "revision label"),
+        (lambda value: value["config"].update(Labels=[]), "revision label"),
+        (
+            lambda value: value["config"]["Labels"].update(
+                {manifest.REVISION_ANNOTATION: "0" * 40}
+            ),
+            "imagePlatformSourceRevision",
+        ),
+        (lambda value: value.update(os="windows"), "platform does not match"),
+        (lambda value: value.update(architecture="riscv64"), "platform does not match"),
+        (lambda value: value.pop("os"), "platform does not match"),
+        (lambda value: value.pop("architecture"), "platform does not match"),
+    ],
+)
+def test_preflight_still_checks_every_runnable_image_with_attestations(
+    config_digest, change, message
+) -> None:
+    runner, _ = attestation_runner()
+    config = runner.responses[
+        ("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{config_digest}")
+    ]
+    change(config)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+
+
+def test_preflight_attestations_do_not_relax_approved_index_digest() -> None:
+    runner, _ = attestation_runner()
+    value = candidate()
+    value["imageDigest"] = "sha256:" + "f" * 64
+    with pytest.raises(manifest.ManifestError, match="imageDigest"):
+        manifest.preflight(value, manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner)
+
+
+@pytest.mark.parametrize("media_type", [OCI_EMPTY_CONFIG_TYPE, OCI_CONFIG_TYPE])
+def test_preflight_supports_buildkit_empty_config_media_types(media_type) -> None:
+    runner, _ = attestation_runner()
+    for digest in ATTESTATION_DIGESTS:
+        value = runner.responses[("manifest", "fetch", f"{manifest.IMAGE_REF}@{digest}")]
+        value["config"]["mediaType"] = media_type
+    results = manifest.preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+    )
+    assert (
+        len([item for item in results if item["check"].startswith("imagePlatformSourceRevision[")])
+        == 2
+    )
+    assert all(item["passed"] for item in results)
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda value: value.update(artifactType="unexpected"), "artifact type"),
+        (lambda value: value.update(artifactType=None), "artifact type"),
+        (lambda value: value.update(subject=None), "subject does not match"),
+        (lambda value: value.update(subject={}), "subject does not match"),
+        (
+            lambda value: value["subject"].update(digest=ARM_PLATFORM_DIGEST),
+            "subject does not match",
+        ),
+        (lambda value: value["subject"].update(digest="invalid"), "subject does not match"),
+        (
+            lambda value: value["subject"].update(mediaType=OCI_CONFIG_TYPE),
+            "subject does not match",
+        ),
+    ],
+)
+def test_preflight_attestation_payload_binding_cannot_contradict_index(change, message) -> None:
+    runner, _ = attestation_runner()
+    value = runner.responses[
+        ("manifest", "fetch", f"{manifest.IMAGE_REF}@{ATTESTATION_DIGESTS[0]}")
+    ]
+    change(value)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+
+
+def test_preflight_accepts_legacy_buildkit_shape_without_subject_or_artifact_type() -> None:
+    runner, _ = attestation_runner()
+    for digest in ATTESTATION_DIGESTS:
+        value = runner.responses[("manifest", "fetch", f"{manifest.IMAGE_REF}@{digest}")]
+        value.pop("subject")
+        value.pop("artifactType")
+        value["config"]["mediaType"] = OCI_CONFIG_TYPE
+    assert all(
+        item["passed"]
+        for item in manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=runner
+        )
+    )
