@@ -2149,7 +2149,7 @@ def test_hotfix_rejects_health_drift_and_missing_or_invalid_artifact_proof(
 )
 def test_hotfix_health_rejects_oversized_or_malformed_payload_without_leaking(payload):
     with pytest.raises(verifier.VerificationError) as raised:
-        verifier.hotfix_health(payload, "public health version")
+        verifier.hotfix_health(payload, "public health version", verifier.HOTFIX_302_COORDINATES)
     assert str(raised.value) == "public health version"
     assert SENTINEL not in str(raised.value)
 
@@ -2163,3 +2163,53 @@ def test_hotfix_artifact_proof_rejects_oversized_or_malformed_payload_without_le
         verifier.hotfix_artifact_version(payload, verifier.HOTFIX_302_COORDINATES)
     assert str(raised.value) == "artifact version proof"
     assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+def test_historical_hotfix_labels_remain_unchanged(coordinates):
+    assert verifier.hotfix_version_label(coordinates, "identity") == "v3.0.2+4790074"
+
+
+@pytest.mark.parametrize(
+    "digest", [None, "", "sha256:" + "0" * 64, verifier.HOTFIX_302_COORDINATES["imageDigest"]]
+)
+def test_unpublished_changelog_source_cannot_inherit_hotfix_compatibility(digest):
+    # The reviewed source is not a published immutable tuple. In particular, its
+    # predecessor's digest must never be treated as evidence for this new source.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+        "imageTag": "hotfix-558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+        "imageDigest": digest,
+    }
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) is None
+    with pytest.raises(verifier.VerificationError, match="health version"):
+        verifier.hotfix_health(
+            b'{"status":"ready","version":"v3.0.2+558ce3c"}', "health version", value
+        )
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_hotfix_label_uses_only_explicitly_allowlisted_test_coordinates(monkeypatch):
+    # Synthetic unit fixture only: no new image digest is being allowlisted.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "a" * 40,
+        "imageTag": "hotfix-" + "a" * 40,
+        "imageDigest": "sha256:" + "a" * 64,
+    }
+    monkeypatch.setattr(verifier, "HOTFIX_IDENTITY_COORDINATES", (value,))
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+aaaaaaa"
+    verifier.hotfix_health(b'{"status":"ready","version":"v3.0.2+aaaaaaa"}', "health", value)
+    with pytest.raises(verifier.VerificationError, match="health"):
+        verifier.hotfix_health(b'{"status":"ready","version":"v3.0.2+4790074"}', "health", value)
+    proof = hotfix_runner_proof(
+        sourceRevision=value["sourceRevision"],
+        imageDigest=value["imageDigest"],
+        imageVersionLabel="v3.0.2+aaaaaaa",
+    )
+    assert verifier.hotfix_artifact_version(proof, value) == "3.0.2"
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
