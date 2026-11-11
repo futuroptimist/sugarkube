@@ -23,7 +23,7 @@ def test_promtool_dependency_parity_and_stage():
     validation = jobs["claude-validation"]
     steps = validation["steps"]
     install = promtool_step(steps)
-    for filename, job in [("tests.yml", "test"), ("ci.yml", "test")]:
+    for filename, job in [("tests.yml", "test"), ("ci.yml", "bash"), ("ci.yml", "python")]:
         assert install["env"] == promtool_step(workflow(filename)["jobs"][job]["steps"])["env"]
     names = [step.get("name") for step in steps]
     assert names.index("Install promtool") < names.index("Checkout same-repository PR commit")
