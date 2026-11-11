@@ -103,6 +103,14 @@ HOTFIX_302_COORDINATES = {
     "imageDigest": "sha256:5d16cde03df4cfe9a52341c26bb6167234d315f896d422af38383b760bebcfe0",
     "semanticTag": "v3.0.2",
 }
+# Published by DSPACE run 42975610091; preserve the older compatibility tuple.
+HOTFIX_302_CHART_313_COORDINATES = {
+    **HOTFIX_302_COORDINATES,
+    "chartSourceRevision": "2d2c4c7d384d5da270a94654a87c71a5bdfd0420",
+    "chartVersion": "3.1.3",
+    "chartDigest": "sha256:ee1a6bcdd5f601d473e81ea42c8dfb4055fa0016e7c4fd5fcd163ef3dba7a366",
+}
+HOTFIX_IDENTITY_COORDINATES = (HOTFIX_302_COORDINATES, HOTFIX_302_CHART_313_COORDINATES)
 LEGACY_IDENTITY_COORDINATES = (
     LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,
@@ -296,8 +304,11 @@ def marker(raw: bytes, revision: str, category: str) -> None:
 
 
 def identity_contract(manifest: dict[str, Any]) -> str:
-    """Select legacy identity only for a complete approved immutable tuple."""
-    if all(manifest.get(key) == value for key, value in HOTFIX_302_COORDINATES.items()):
+    """Select a compatibility identity only for a complete supported immutable tuple."""
+    if any(
+        all(manifest.get(key) == value for key, value in coordinates.items())
+        for coordinates in HOTFIX_IDENTITY_COORDINATES
+    ):
         return HOTFIX_IDENTITY_CONTRACT
     if any(
         all(manifest.get(key) == value for key, value in coordinates.items())

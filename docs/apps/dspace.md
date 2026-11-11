@@ -455,7 +455,7 @@ verification uses the same command with `env=prod` and a production candidate or
 The hotfix at source `47900748f61e1ef38c6289fc697f7a070f7fa3c9` uses the full tag
 `hotfix-47900748f61e1ef38c6289fc697f7a070f7fa3c9` and image index
 `sha256:5d16cde03df4cfe9a52341c26bb6167234d315f896d422af38383b760bebcfe0`.
-Only the complete hotfix/chart/provider tuple in `HOTFIX_302_COORDINATES` selects
+Only the complete hotfix/chart/provider tuples in `HOTFIX_IDENTITY_COORDINATES` select
 `hotfix-build-meta-oci-v1` and `hotfix-openai-config-v1`. All existing image, chart,
 environment, readiness, rollback, and finalization checks remain required.
 
@@ -475,10 +475,25 @@ validators. Run it with `DSPACE_RUNNER_CHECKOUT` pointing to the pinned companio
 DSPACE_RUNNER_CHECKOUT=/path/to/dspace pytest -q tests/test_dspace_hotfix_runner_integration.py
 ```
 
-This is tooling compatibility, not chart verification or promotion authority. Chart 3.0.3
-remains historical publication evidence: anonymous registry access returned HTTP 401.
-Its recorded source render sets the health version to the image tag and digest, which
-this contract rejects. No chart changes or staging rollout are included here.
+Chart 3.1.3 adds the explicit runtime-version override required by this hotfix.
+Its published source is `2d2c4c7d384d5da270a94654a87c71a5bdfd0420`, and its OCI digest is
+`sha256:ee1a6bcdd5f601d473e81ea42c8dfb4055fa0016e7c4fd5fcd163ef3dba7a366`.
+The archive digest is
+`sha256:a510404755d093f9698549f8af1b5d1869bc404ab0fb47e58af956307d95f4b4`.
+[Publication run 42975610091](https://github.com/democratizedspace/dspace/actions/runs/42975610091)
+verified the packaged provenance and published OCI coordinate. The chart's `appVersion`
+and default image remain 3.1.0; they do not select the application for this hotfix.
+
+Use `config=docs/examples/apps/dspace-hotfix-302.env` for the staging candidate.
+It selects chart 3.1.3 and appends the candidate-specific values that set
+`runtimeVersion: v3.0.2+4790074` and `chat.defaultProvider: openai`.
+Supply the exact hotfix image tag and approved candidate manifest through the existing
+release workflow. This config intentionally has no production values chain and leaves
+all shared chart pins and staging/production defaults unchanged.
+
+The old chart 3.0.3 compatibility tuple remains supported for historical evidence;
+its source render cannot supply the required hotfix health version. Neither compatibility
+tuple grants rollout authority or replaces successful staging verification before production.
 
 ## Artifact model
 

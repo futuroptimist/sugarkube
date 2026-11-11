@@ -10,9 +10,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from test_dspace_runtime_verifier import _verify_setup
 
 from scripts import dspace_runtime_verifier as verifier
-from test_dspace_runtime_verifier import _verify_setup
 
 RUNNER_ROOT = os.environ.get("DSPACE_RUNNER_CHECKOUT")
 pytestmark = pytest.mark.skipif(
@@ -24,7 +24,8 @@ HARNESS = Path(__file__).parent / "fixtures/dspace_hotfix/check-runner.mjs"
 @pytest.mark.parametrize(
     "fault", [None, "health", "revision", "provider", "argv-version", "argv-digest"]
 )
-def test_actual_hotfix_runner_contract(monkeypatch, tmp_path, fault):
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+def test_actual_hotfix_runner_contract(monkeypatch, tmp_path, fault, coordinates):
     assert RUNNER_ROOT and (Path(RUNNER_ROOT) / "scripts/hotfix-302-contract.mjs").is_file()
     real_run = subprocess.run
     args, _ = _verify_setup(
@@ -32,7 +33,7 @@ def test_actual_hotfix_runner_contract(monkeypatch, tmp_path, fault):
         tmp_path,
         legacy=True,
         provider="openai",
-        coordinates=verifier.HOTFIX_302_COORDINATES,
+        coordinates=coordinates,
     )
     calls = []
 
