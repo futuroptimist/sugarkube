@@ -88,12 +88,17 @@ jobs:
                "$KCOV_OUT" \
                bats --recursive tests/bats
 
+      # Artifact uploads dereference symlinks; keep kcov's report alias intact.
+      - name: Package Bash coverage
+        if: always()
+        run: tar -czf ci-bash-coverage.tar.gz -C coverage kcov
+
       - name: Preserve Bash coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-bash-coverage
-          path: coverage/kcov
+          path: ci-bash-coverage.tar.gz
           if-no-files-found: error
 
   python:
@@ -186,7 +191,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ci-bash-coverage
-          path: coverage/kcov
+          path: coverage-artifacts
+
+      - name: Unpack Bash coverage
+        if: always()
+        run: |
+          mkdir -p coverage
+          tar -xzf coverage-artifacts/ci-bash-coverage.tar.gz -C coverage
 
       - name: Restore Python coverage
         if: always()

@@ -1,6 +1,7 @@
 """Guard isolated CI suites, complete coverage transfer, and the required check."""
 
 import os
+import shutil
 import subprocess
 from itertools import product
 from pathlib import Path
@@ -144,7 +145,7 @@ def test_ci_keeps_full_test_inventories_and_coverage_arguments():
 @pytest.mark.parametrize(
     "lane,label,upload_path,download_path",
     [
-        ("bash", "Bash", "coverage/kcov", "coverage/kcov"),
+        ("bash", "Bash", "ci-bash-coverage.tar.gz", "coverage-artifacts"),
         ("python", "Python", "coverage/python-coverage.xml", "coverage"),
     ],
 )
@@ -165,8 +166,7 @@ def test_ci_preserves_disjoint_coverage_artifacts_even_after_failure(
         "path": upload_path,
         "if-no-files-found": "error",
     }
-    # Directory contents are rooted inside their uploaded directory; individual files
-    # are rooted at the filename. Restore each to its original Codecov search path.
+    # Both uploaded files retain their basenames in the configured download directory.
     assert download["with"] == {"name": f"ci-{lane}-coverage", "path": download_path}
 
 
@@ -185,7 +185,8 @@ def test_ci_keeps_combined_codecov_reporting_and_failure_semantics():
         },
     }
     names = [item.get("name") for item in workflow()["jobs"]["test"]["steps"]]
-    assert names.index("Restore Bash coverage") < names.index(upload["name"])
+    assert names.index("Restore Bash coverage") < names.index("Unpack Bash coverage")
+    assert names.index("Unpack Bash coverage") < names.index(upload["name"])
     assert names.index("Restore Python coverage") < names.index(upload["name"])
 
 
@@ -212,3 +213,51 @@ def test_ci_required_check_fails_closed_for_every_lane_result(bash_result, pytho
         text=True,
     )
     assert result.returncode == (0 if bash_result == python_result == "success" else 1)
+
+
+def test_ci_bash_coverage_round_trip_preserves_report_symlinks(tmp_path):
+    producer = tmp_path / "producer"
+    report = producer / "coverage" / "kcov" / "bats.example"
+    report.mkdir(parents=True)
+    files = {
+        "cobertura.xml": "<coverage/>",
+        "codecov.json": '{"coverage":{}}',
+        "coverage.json": '{"files":[]}',
+    }
+    for name, data in files.items():
+        (report / name).write_text(data)
+    (report.parent / "bats").symlink_to("bats.example", target_is_directory=True)
+    package = step("bash", "Package Bash coverage")
+    unpack = step("test", "Unpack Bash coverage")
+    assert package["if"] == unpack["if"] == "always()"
+    assert "continue-on-error" not in package and "continue-on-error" not in unpack
+    assert package["run"].strip() == "tar -czf ci-bash-coverage.tar.gz -C coverage kcov"
+    subprocess.run(["bash", "-e", "-c", package["run"]], cwd=producer, check=True)
+    archive = producer / step("bash", "Preserve Bash coverage")["with"]["path"]
+    consumer = tmp_path / "consumer"
+    download = consumer / step("test", "Restore Bash coverage")["with"]["path"]
+    download.mkdir(parents=True)
+    shutil.copy2(archive, download / archive.name)
+    subprocess.run(["bash", "-e", "-c", unpack["run"]], cwd=consumer, check=True)
+    restored = consumer / "coverage" / "kcov"
+    assert (restored / "bats").is_symlink()
+    assert (restored / "bats").readlink() == Path("bats.example")
+    found = {}
+    for directory, _, names in os.walk(restored):
+        for name in names:
+            path = Path(directory) / name
+            found[str(path.relative_to(restored))] = path.read_text()
+    assert found == {f"bats.example/{name}": data for name, data in files.items()}
+    for name, data in files.items():
+        assert (restored / "bats" / name).read_text() == data
+
+
+@pytest.mark.parametrize("name", ["Package Bash coverage", "Unpack Bash coverage"])
+def test_ci_missing_bash_coverage_archive_fails_closed(tmp_path, name):
+    job = "bash" if name == "Package Bash coverage" else "test"
+    result = subprocess.run(
+        ["bash", "-e", "-c", step(job, name)["run"]],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    assert result.returncode != 0
