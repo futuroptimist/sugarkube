@@ -368,13 +368,21 @@ def legacy_identity(raw: bytes, revision: str, category: str) -> tuple[str, str,
     return revision, generated_at, source
 
 
-def hotfix_health(raw: bytes, category: str) -> None:
+def hotfix_version_label(manifest: dict[str, Any], category: str) -> str:
+    """Derive the label only after matching a published immutable compatibility tuple."""
+    if identity_contract(manifest) != HOTFIX_IDENTITY_CONTRACT:
+        fail(category)
+    return f"v{manifest['applicationVersion']}+{manifest['sourceRevision'][:7]}"
+
+
+def hotfix_health(raw: bytes, category: str, manifest: dict[str, Any]) -> None:
     """Check health configuration agreement; OCI evidence proves application version."""
+    expected_label = hotfix_version_label(manifest, category)
     try:
         if len(raw) > 1024 * 1024:
             fail(category)
         value = json.loads(raw)
-        if value.get("status") != "ready" or value.get("version") != HOTFIX_VERSION_LABEL:
+        if value.get("status") != "ready" or value.get("version") != expected_label:
             fail(category)
     except (ValueError, AttributeError, RecursionError):
         fail(category)
@@ -387,7 +395,7 @@ def hotfix_artifact_version(stdout: str, manifest: dict[str, Any]) -> str:
         "applicationVersion": manifest["applicationVersion"],
         "sourceRevision": manifest["sourceRevision"],
         "imageDigest": manifest["imageDigest"],
-        "imageVersionLabel": HOTFIX_VERSION_LABEL,
+        "imageVersionLabel": hotfix_version_label(manifest, "artifact version proof"),
     }
     try:
         if len(stdout) > 1024 * 1024:
@@ -622,7 +630,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             direct_html = command(proxy + [prefix + "/"]).encode()
             if contract == HOTFIX_IDENTITY_CONTRACT:
                 hotfix_health(
-                    command(proxy + [prefix + "/healthz"]).encode(), "direct health version"
+                    command(proxy + [prefix + "/healthz"]).encode(),
+                    "direct health version",
+                    manifest,
                 )
         except VerificationError:
             fail("direct identity")
@@ -663,7 +673,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     if public_identity != replica_identity:
         fail("public identity")
     if contract == HOTFIX_IDENTITY_CONTRACT:
-        hotfix_health(fetch(base_url + "/healthz", origin), "public health version")
+        hotfix_health(fetch(base_url + "/healthz", origin), "public health version", manifest)
     public_root = fetch(base_url + "/", origin)
     if uses_build_meta:
         root_document(public_root, "public identity")
