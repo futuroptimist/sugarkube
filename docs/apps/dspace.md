@@ -484,15 +484,35 @@ The archive digest is
 verified the packaged provenance and published OCI coordinate. The chart's `appVersion`
 and default image remain 3.1.0; they do not select the application for this hotfix.
 
-Use `config=docs/examples/apps/dspace-hotfix-302.env` for the staging candidate.
+Use `config=docs/examples/apps/dspace-hotfix-302.env` only for the verified
+intermediate staging candidate, not as approval of the final production candidate.
 It selects chart 3.1.3 and appends the candidate-specific values that set
-`runtimeVersion: v3.0.2+4790074` and `chat.defaultProvider: openai`.
+`runtimeVersion: v3.0.2+558ce3c` and `chat.defaultProvider: openai`.
+This overlay targets the verified intermediate November source
+`558ce3c35163d97aea5594d6aba430c6a3dde1a3` and image index
+`sha256:4503e9aa941c842893bd02a05edfc7fb2f61afca916d06b0c160c5b798477ec5`.
+The historical `v3.0.2+4790074` image tuples remain supported, but require their
+matching runtime label rather than this replacement overlay.
+The contract workflow pins actual merged companion commit
+`dc195b7c0b65ba6f556ea5f57637aefaff2a31a3` from DSPACE PR #4874,
+merged on November 13. Its tree `53f4b6ef313e60cea28745407e01f9db05fb1164`
+is identical to the final PR head with passing hosted checks and no findings from
+Codex, Copilot, or Greptile. This is companion evidence, not proof of Sugarkube
+final-commit CI or staging acceptance. Before publication or readiness, verify the
+selected published companion identity. If that selection changes, verify the new
+commit and tree, refresh this pin, and rerun integration checks; do not use a
+speculative merge SHA.
+The planned November 11 release date was missed. The final candidate needs an updated
+release date close to production and a newly built, published, and verified image.
+November 14 is tentative only. Do not treat this source or digest as the final
+production candidate or infer its future date, source revision, or image digest.
+Review the companion and pass final-commit CI before considering this integration ready.
 Supply the exact hotfix image tag and approved candidate manifest through the existing
 release workflow. This config intentionally has no production values chain and leaves
 all shared chart pins and staging/production defaults unchanged.
 
 The old chart 3.0.3 compatibility tuple remains supported for historical evidence;
-its source render cannot supply the required hotfix health version. Neither compatibility
+its source render cannot supply the required hotfix health version. No compatibility
 tuple grants rollout authority or replaces successful staging verification before production.
 
 ## Artifact model

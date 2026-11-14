@@ -110,7 +110,19 @@ HOTFIX_302_CHART_313_COORDINATES = {
     "chartVersion": "3.1.3",
     "chartDigest": "sha256:ee1a6bcdd5f601d473e81ea42c8dfb4055fa0016e7c4fd5fcd163ef3dba7a366",
 }
-HOTFIX_IDENTITY_COORDINATES = (HOTFIX_302_COORDINATES, HOTFIX_302_CHART_313_COORDINATES)
+# Replacement image: publication run 43164575478, verification-only run 43177167022.
+# Reuse the verified chart identity; no chart or rollout approval is implied.
+HOTFIX_302_NOVEMBER_COORDINATES = {
+    **HOTFIX_302_CHART_313_COORDINATES,
+    "sourceRevision": "558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+    "imageTag": "hotfix-558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+    "imageDigest": "sha256:4503e9aa941c842893bd02a05edfc7fb2f61afca916d06b0c160c5b798477ec5",
+}
+HOTFIX_IDENTITY_COORDINATES = (
+    HOTFIX_302_COORDINATES,
+    HOTFIX_302_CHART_313_COORDINATES,
+    HOTFIX_302_NOVEMBER_COORDINATES,
+)
 LEGACY_IDENTITY_COORDINATES = (
     LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,

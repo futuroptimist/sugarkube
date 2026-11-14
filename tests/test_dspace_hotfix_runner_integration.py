@@ -41,11 +41,14 @@ def test_actual_hotfix_runner_contract(monkeypatch, tmp_path, fault, coordinates
         payload = {
             "argv": list(argv),
             "meta": {
-                "gitSha": verifier.HOTFIX_302_COORDINATES["sourceRevision"],
+                "gitSha": coordinates["sourceRevision"],
                 "generatedAt": "2026-10-31T23:34:25.629Z",
                 "source": "env",
             },
-            "health": {"status": "ready", "version": verifier.HOTFIX_VERSION_LABEL},
+            "health": {
+                "status": "ready",
+                "version": verifier.hotfix_version_label(coordinates, "identity"),
+            },
             "config": {
                 "offlineWorker": {"enabled": True},
                 "telemetry": {"enabled": False},
@@ -84,6 +87,6 @@ def test_actual_hotfix_runner_contract(monkeypatch, tmp_path, fault, coordinates
             result, json.loads(args.manifest.read_text()), "staging"
         )
         assert result["applicationVersion"] == "3.0.2"
-        assert result["runtimeSourceRevision"] == verifier.HOTFIX_302_COORDINATES["sourceRevision"]
+        assert result["runtimeSourceRevision"] == coordinates["sourceRevision"]
         assert calls[0].returncode == 0
         assert verifier.ARTIFACT_PROOF_PREFIX in calls[0].stdout

@@ -336,7 +336,7 @@ def _verify_setup(
             raise verifier.VerificationError(SENTINEL)
         if argv[-1].endswith("/healthz"):
             return override.get("direct_health", {}).get(
-                pod_name, json.dumps({"status": "ready", "version": verifier.HOTFIX_VERSION_LABEL})
+                pod_name, json.dumps({"status": "ready", "version": f"v{version}+{revision[:7]}"})
             )
         if argv[-1].endswith("build-meta.json"):
             return override.get("direct_meta", {}).get(pod_name, legacy_build)
@@ -351,7 +351,7 @@ def _verify_setup(
         lambda url, origin: str(
             override.get(
                 "public_health",
-                json.dumps({"status": "ready", "version": verifier.HOTFIX_VERSION_LABEL}),
+                json.dumps({"status": "ready", "version": f"v{version}+{revision[:7]}"}),
             )
             if url.endswith("/healthz")
             else (
@@ -379,7 +379,7 @@ def _verify_setup(
                 override.get(
                     "chat_stdout",
                     (
-                        hotfix_runner_proof()
+                        hotfix_runner_proof(coordinates=coordinates)
                         if coordinates in verifier.HOTFIX_IDENTITY_COORDINATES
                         else SENTINEL
                     ),
@@ -2079,24 +2079,21 @@ def test_hotfix_build_meta_contract(monkeypatch, tmp_path, overrides, failure, c
             verifier.verify(args)
         return
     result = verifier.verify(args)
-    assert result["runtimeSourceRevision"] == verifier.HOTFIX_302_COORDINATES["sourceRevision"]
+    assert result["runtimeSourceRevision"] == coordinates["sourceRevision"]
     assert result["journeys"][0] == {"name": "/build-meta.json", "passed": True}
     assert seen[-1][seen[-1].index("--identity-contract") + 1] == verifier.HOTFIX_IDENTITY_CONTRACT
     assert seen[-1][seen[-1].index("--provider-config-contract") + 1] == "hotfix-openai-config-v1"
-    assert (
-        seen[-1][seen[-1].index("--expected-image-digest") + 1]
-        == verifier.HOTFIX_302_COORDINATES["imageDigest"]
-    )
+    assert seen[-1][seen[-1].index("--expected-image-digest") + 1] == coordinates["imageDigest"]
 
 
-def hotfix_runner_proof(**changes: object) -> str:
-    value = verifier.HOTFIX_302_COORDINATES
+def hotfix_runner_proof(coordinates=None, **changes: object) -> str:
+    value = coordinates or verifier.HOTFIX_302_COORDINATES
     proof = {
         "method": "sha256-index-platform-config-version-label",
         "applicationVersion": value["applicationVersion"],
         "sourceRevision": value["sourceRevision"],
         "imageDigest": value["imageDigest"],
-        "imageVersionLabel": verifier.HOTFIX_VERSION_LABEL,
+        "imageVersionLabel": f"v{value['applicationVersion']}+{value['sourceRevision'][:7]}",
         **changes,
     }
     return verifier.ARTIFACT_PROOF_PREFIX + json.dumps(proof)
@@ -2165,7 +2162,10 @@ def test_hotfix_artifact_proof_rejects_oversized_or_malformed_payload_without_le
     assert SENTINEL not in str(raised.value)
 
 
-@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+@pytest.mark.parametrize(
+    "coordinates",
+    (verifier.HOTFIX_302_COORDINATES, verifier.HOTFIX_302_CHART_313_COORDINATES),
+)
 def test_historical_hotfix_labels_remain_unchanged(coordinates):
     assert verifier.hotfix_version_label(coordinates, "identity") == "v3.0.2+4790074"
 
@@ -2174,8 +2174,8 @@ def test_historical_hotfix_labels_remain_unchanged(coordinates):
     "digest", [None, "", "sha256:" + "0" * 64, verifier.HOTFIX_302_COORDINATES["imageDigest"]]
 )
 def test_unpublished_changelog_source_cannot_inherit_hotfix_compatibility(digest):
-    # The reviewed source is not a published immutable tuple. In particular, its
-    # predecessor's digest must never be treated as evidence for this new source.
+    # Missing, unknown, and predecessor digests are not the verified new tuple.
+    # A source revision alone never grants compatibility.
     value = {
         **verifier.HOTFIX_302_CHART_313_COORDINATES,
         "sourceRevision": "558ce3c35163d97aea5594d6aba430c6a3dde1a3",
@@ -2213,3 +2213,12 @@ def test_hotfix_label_uses_only_explicitly_allowlisted_test_coordinates(monkeypa
     assert verifier.hotfix_artifact_version(proof, value) == "3.0.2"
     with pytest.raises(verifier.VerificationError, match="artifact version proof"):
         verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_november_tuple_uses_verified_chart_and_source_label():
+    value = verifier.HOTFIX_302_NOVEMBER_COORDINATES
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+558ce3c"
+    for field in ("chartVersion", "chartSourceRevision", "chartDigest"):
+        assert value[field] == verifier.HOTFIX_302_CHART_313_COORDINATES[field]
+    assert verifier.identity_contract(value) == verifier.HOTFIX_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) == "hotfix-openai-config-v1"
