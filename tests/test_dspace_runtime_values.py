@@ -224,7 +224,7 @@ def test_hotfix_candidate_config_keeps_explicit_runtime_and_provider() -> None:
     config = load_config("dspace", "staging", str(config_path))
     document = merged_values_document(tuple(config["SUGARKUBE_VALUES"].split(",")))
     assert config["SUGARKUBE_VERSION"] == "3.1.3"
-    assert document["runtimeVersion"] == "v3.0.2+4790074"
+    assert document["runtimeVersion"] == "v3.0.2+558ce3c"
     assert document["chat"]["defaultProvider"] == "openai"
     assert document["environment"] == "staging"
     assert document["ingress"]["host"] == "staging.democratized.space"
