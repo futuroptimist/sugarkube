@@ -1546,10 +1546,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             return 0
         fi
 
+        # Parse stdout only; kubectl warnings and errors must remain on stderr.
         local kubectl_output=""
         if ! kubectl_output="$(
             kubectl -n "${namespace}" get deploy,statefulset,daemonset \
-                -l "app.kubernetes.io/instance=${release}" -o name 2>&1
+                -l "app.kubernetes.io/instance=${release}" -o name
         )"; then
             echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}' via label app.kubernetes.io/instance=${release}:" >&2
             echo "       ${kubectl_output}" >&2
@@ -1564,7 +1565,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         if [ ${#rollout_targets[@]} -eq 0 ]; then
             if ! kubectl_output="$(
                 kubectl -n "${namespace}" get deploy,statefulset,daemonset \
-                    -l "release=${release}" -o name 2>&1
+                    -l "release=${release}" -o name
             )"; then
                 echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}' via label release=${release}:" >&2
                 echo "       ${kubectl_output}" >&2
