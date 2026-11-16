@@ -484,32 +484,39 @@ The archive digest is
 verified the packaged provenance and published OCI coordinate. The chart's `appVersion`
 and default image remain 3.1.0; they do not select the application for this hotfix.
 
-Use `config=docs/examples/apps/dspace-hotfix-302.env` only for the verified
-intermediate staging candidate, not as approval of the final production candidate.
-It selects chart 3.1.3 and appends the candidate-specific values that set
-`runtimeVersion: v3.0.2+558ce3c` and `chat.defaultProvider: openai`.
-This overlay targets the verified intermediate November source
-`558ce3c35163d97aea5594d6aba430c6a3dde1a3` and image index
-`sha256:4503e9aa941c842893bd02a05edfc7fb2f61afca916d06b0c160c5b798477ec5`.
-The historical `v3.0.2+4790074` image tuples remain supported, but require their
-matching runtime label rather than this replacement overlay.
-The contract workflow pins actual merged companion commit
-`dc195b7c0b65ba6f556ea5f57637aefaff2a31a3` from DSPACE PR #4874,
-merged on November 13. Its tree `53f4b6ef313e60cea28745407e01f9db05fb1164`
-is identical to the final PR head with passing hosted checks and no findings from
-Codex, Copilot, or Greptile. This is companion evidence, not proof of Sugarkube
-final-commit CI or staging acceptance. Before publication or readiness, verify the
-selected published companion identity. If that selection changes, verify the new
-commit and tree, refresh this pin, and rerun integration checks; do not use a
-speculative merge SHA.
-The planned November 11 release date was missed. The final candidate needs an updated
-release date close to production and a newly built, published, and verified image.
-November 14 is tentative only. Do not treat this source or digest as the final
-production candidate or infer its future date, source revision, or image digest.
-Review the companion and pass final-commit CI before considering this integration ready.
-Supply the exact hotfix image tag and approved candidate manifest through the existing
-release workflow. This config intentionally has no production values chain and leaves
-all shared chart pins and staging/production defaults unchanged.
+Use `config=docs/examples/apps/dspace-hotfix-302.env` for bounded staging verification
+of the final dated candidate, not as production approval. It selects chart 3.1.3
+and appends `runtimeVersion: v3.0.2+bfb9102` and `chat.defaultProvider: openai`.
+The exact source is `bfb910201e23119cb26902d8ca6787070150b695`, with index
+`sha256:e9331b4319a9d475b910be6265613202a93d133fe33a8c6685dd962746a8e485`
+and arm64 manifest
+`sha256:32fc5c8ccc31ac57d9f915527a22ed82143f44ae2752a25b441c87372d7228ce`.
+All historical image/chart tuples remain supported with their matching runtime
+labels; preserve their finalized evidence and rollback configuration.
+
+[Publication run 43777310401](https://github.com/democratizedspace/dspace/actions/runs/43777310401)
+pushed this immutable image but failed its post-push registry token read. Its
+original receipt records `published: true`, `verified: false`, and no completed
+smokes. Do not rerun the publisher. The companion authenticates the original OCI
+index/platform/config bytes and both source/version labels; that metadata proof
+is not runtime acceptance.
+
+The integration workflow pins actual [DSPACE PR #4879](https://github.com/democratizedspace/dspace/pull/4879)
+head `ee6695a1eb140a01c7588017c290cec2e4b7f22e`, tree
+`f8f380061263ade633aa94642d7753ff261c92ff`, not a speculative merge SHA.
+Its 136 focused local contract tests passed. Check that PR's final-head CI and
+reviews before readiness; if its head changes, recheck the tree, refresh the pin
+and rerun the integration. The existing integration exercises all four supported
+image/chart tuples against the real pinned companion.
+
+Use a fresh candidate/evidence packet and the existing bounded staging
+runtime/health verification, reusing earlier broad functional acceptance. No new
+recovery workflow or broad qualification campaign is required. The date is
+November 15 in the candidate changelog; a successful metadata check does not
+establish a production release. Owner approval and production rollback evidence
+remain separate gates. Supply the exact image tag and candidate manifest through
+the existing release workflow. This config intentionally has no production
+values chain; shared chart pins and staging/production defaults are unchanged.
 
 The old chart 3.0.3 compatibility tuple remains supported for historical evidence;
 its source render cannot supply the required hotfix health version. No compatibility

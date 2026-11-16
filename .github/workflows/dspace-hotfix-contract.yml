@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: democratizedspace/dspace
-          ref: dc195b7c0b65ba6f556ea5f57637aefaff2a31a3
+          ref: ee6695a1eb140a01c7588017c290cec2e4b7f22e
           path: .integration/dspace
           persist-credentials: false
       - uses: actions/setup-node@v4

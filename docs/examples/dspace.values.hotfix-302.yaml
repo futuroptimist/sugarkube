@@ -1,5 +1,5 @@
-# Verified intermediate v3.0.2 settings; append after the staging values overlay.
-# Not the final production candidate: release-date correction and a new image are required.
-runtimeVersion: v3.0.2+558ce3c
+# Final dated v3.0.2 candidate; append after the staging values overlay.
+# Compatibility only: fresh staging acceptance and owner rollout approval required.
+runtimeVersion: v3.0.2+bfb9102
 chat:
   defaultProvider: openai
