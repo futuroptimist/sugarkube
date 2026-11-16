@@ -2222,3 +2222,35 @@ def test_november_tuple_uses_verified_chart_and_source_label():
         assert value[field] == verifier.HOTFIX_302_CHART_313_COORDINATES[field]
     assert verifier.identity_contract(value) == verifier.HOTFIX_IDENTITY_CONTRACT
     assert verifier.provider_config_contract(value) == "hotfix-openai-config-v1"
+
+
+@pytest.mark.parametrize(
+    "digest",
+    [None, "", "sha256:" + "0" * 64, verifier.HOTFIX_302_NOVEMBER_COORDINATES["imageDigest"]],
+)
+def test_final_candidate_rejects_missing_or_predecessor_digest(digest):
+    # Missing, unknown, and predecessor digests are not the verified new tuple.
+    # A source revision alone never grants compatibility.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "bfb910201e23119cb26902d8ca6787070150b695",
+        "imageTag": "hotfix-bfb910201e23119cb26902d8ca6787070150b695",
+        "imageDigest": digest,
+    }
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) is None
+    with pytest.raises(verifier.VerificationError, match="health version"):
+        verifier.hotfix_health(
+            b'{"status":"ready","version":"v3.0.2+bfb9102"}', "health version", value
+        )
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_final_candidate_reuses_verified_chart_and_source_label():
+    value = verifier.HOTFIX_302_NOVEMBER15_COORDINATES
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+bfb9102"
+    for field in ("chartVersion", "chartSourceRevision", "chartDigest"):
+        assert value[field] == verifier.HOTFIX_302_CHART_313_COORDINATES[field]
+    assert verifier.identity_contract(value) == verifier.HOTFIX_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) == "hotfix-openai-config-v1"
