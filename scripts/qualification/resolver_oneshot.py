@@ -9,13 +9,14 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from resolver_lifecycle import FLAGS, ROOT, UNITS, baseline
 
@@ -138,12 +139,26 @@ def probe_cgroup_processes():
 
 
 def verify_bundle(bundle):
-    for line in (bundle / "SHA256SUMS").read_text().splitlines():
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise ValueError("bundle must be a directory, not a symlink")
+
+    def regular_payload(relative):
+        path = bundle
+        for part in relative.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError("bundle path contains a symlink")
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError("bundle payload must be a regular file")
+        return path
+
+    manifest = regular_payload(Path("SHA256SUMS"))
+    for line in manifest.read_text().splitlines():
         digest, relative = line.split("  ", 1)
         path = Path(relative)
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("invalid bundle manifest path")
-        if hashlib.sha256((bundle / path).read_bytes()).hexdigest() != digest:
+        if hashlib.sha256(regular_payload(path).read_bytes()).hexdigest() != digest:
             raise ValueError(f"bundle checksum mismatch: {relative}")
 
 
@@ -355,4 +370,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-approved", type=Path, required=True, metavar="BUNDLE")
     args = parser.parse_args()
-    raise SystemExit(main(args.run_approved.resolve(strict=True)))
+    raise SystemExit(main(args.run_approved.absolute()))

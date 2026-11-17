@@ -1196,3 +1196,75 @@ def test_lifecycle_waits_for_new_probe_readiness_before_tamper_check(lifecycle, 
     module.qualify(output)
     assert waits == [0.05]
     assert json.loads(output.read_text())["passed"]
+
+
+@pytest.mark.parametrize("existing_target", [False, True])
+def test_offline_cli_refuses_destination_symlink(tmp_path, existing_target):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "python-dependencies.json").write_text('{"packages": []}')
+    target = tmp_path / "outside"
+    if existing_target:
+        target.mkdir()
+        (target / "keep").write_text("unchanged")
+    destination = tmp_path / "deps"
+    destination.symlink_to(target, target_is_directory=True)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(DIRECTORY / "resolver_offline_prepare.py"),
+            str(bundle),
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert destination.is_symlink()
+    assert target.exists() == existing_target
+    if existing_target:
+        assert (target / "keep").read_text() == "unchanged"
+
+
+def test_offline_prepare_refuses_dangling_destination_before_manifest_read(tmp_path):
+    module = load("resolver_offline_prepare")
+    destination = tmp_path / "deps"
+    target = tmp_path / "outside"
+    destination.symlink_to(target)
+    with pytest.raises(AssertionError):
+        module.prepare(tmp_path / "missing-bundle", destination)
+    assert destination.is_symlink() and not target.exists()
+
+
+@pytest.mark.parametrize("linked_part", ["manifest", "payload", "directory", "bundle"])
+def test_bundle_verification_refuses_symlinks(tmp_path, monkeypatch, linked_part):
+    monkeypatch.syspath_prepend(str(DIRECTORY))
+    module = load("resolver_oneshot")
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = outside / "payload"
+    payload.write_bytes(b"synthetic payload")
+    relative = "payload"
+    if linked_part == "directory":
+        (bundle / "subdir").symlink_to(outside, target_is_directory=True)
+        relative = "subdir/payload"
+    elif linked_part == "payload":
+        (bundle / "payload").symlink_to(payload)
+    else:
+        (bundle / "payload").write_bytes(payload.read_bytes())
+    record = hashlib.sha256(payload.read_bytes()).hexdigest() + "  " + relative + "\n"
+    if linked_part == "manifest":
+        (outside / "SHA256SUMS").write_text(record)
+        (bundle / "SHA256SUMS").symlink_to(outside / "SHA256SUMS")
+    else:
+        (bundle / "SHA256SUMS").write_text(record)
+    if linked_part == "bundle":
+        alias = tmp_path / "alias"
+        alias.symlink_to(bundle, target_is_directory=True)
+        bundle = alias
+    with pytest.raises(ValueError, match="symlink|regular"):
+        module.verify_bundle(bundle)
+    assert payload.read_bytes() == b"synthetic payload"

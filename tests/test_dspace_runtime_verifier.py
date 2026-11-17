@@ -1,7 +1,7 @@
-from copy import deepcopy
 import json
 import subprocess
 from argparse import Namespace
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -114,9 +114,7 @@ def test_verify_selects_provider_config_contract_only_for_exact_311_tuple(
             "chartVersion": "3.2.0",
         }
     elif drift_field is not None:
-        coordinates[drift_field] = (
-            1 if drift_field == "schemaVersion" else "drift"
-        )
+        coordinates[drift_field] = 1 if drift_field == "schemaVersion" else "drift"
         # Use valid scalar shapes; load validation is isolated below so every selector
         # field, including fields coupled by the manifest schema, is drifted independently.
         if drift_field in {"sourceRevision", "chartSourceRevision"}:
@@ -144,10 +142,12 @@ def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"
     base.write_text(
-        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://old.invalid\n- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: old\n"
+        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://old.invalid\n"
+        "- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: old\n"
     )
     overlay.write_text(
-        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://token.example\n- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: current-model\n"
+        "env:\n- name: DSPACE_TOKEN_PLACE_URL\n  value: https://token.example\n"
+        "- name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n  value: current-model\n"
     )
     assert verifier.values_expectations([base, overlay]) == (
         "https://token.example",
@@ -334,6 +334,10 @@ def _verify_setup(
         failure = override.get("direct_failure")
         if failure == pod_name:
             raise verifier.VerificationError(SENTINEL)
+        if argv[-1].endswith("/healthz"):
+            return override.get("direct_health", {}).get(
+                pod_name, json.dumps({"status": "ready", "version": f"v{version}+{revision[:7]}"})
+            )
         if argv[-1].endswith("build-meta.json"):
             return override.get("direct_meta", {}).get(pod_name, legacy_build)
         if argv[-1].endswith("build-info.json"):
@@ -345,9 +349,16 @@ def _verify_setup(
         verifier,
         "fetch",
         lambda url, origin: str(
-            override.get("public_meta", legacy_build)
-            if url.endswith("build-meta.json")
-            else public_build if url.endswith(".json") else public_html
+            override.get(
+                "public_health",
+                json.dumps({"status": "ready", "version": f"v{version}+{revision[:7]}"}),
+            )
+            if url.endswith("/healthz")
+            else (
+                override.get("public_meta", legacy_build)
+                if url.endswith("build-meta.json")
+                else public_build if url.endswith(".json") else public_html
+            )
         ).encode(),
     )
     monkeypatch.setattr(
@@ -364,7 +375,16 @@ def _verify_setup(
         return subprocess.CompletedProcess(
             argv,
             int(override.get("chat_returncode", 0)),
-            str(override.get("chat_stdout", SENTINEL)),
+            str(
+                override.get(
+                    "chat_stdout",
+                    (
+                        hotfix_runner_proof(coordinates=coordinates)
+                        if coordinates in verifier.HOTFIX_IDENTITY_COORDINATES
+                        else SENTINEL
+                    ),
+                )
+            ),
             str(override.get("chat_stderr", SENTINEL)),
         )
 
@@ -372,7 +392,11 @@ def _verify_setup(
     if legacy_310:
         manifest_path = legacy_310_manifest(tmp_path)
     elif legacy:
-        manifest_path = recovery_manifest(tmp_path)
+        manifest_path = recovery_manifest(tmp_path, **(coordinates or {}))
+        if coordinates in verifier.HOTFIX_IDENTITY_COORDINATES:
+            value = json.loads(manifest_path.read_text())
+            value["environment"] = "staging"
+            manifest_path.write_text(json.dumps(value))
     elif coordinates is not None:
         manifest_path = tmp_path / "selected-coordinates.json"
         manifest_path.write_text(
@@ -762,10 +786,7 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ids=["chart-3.0.2", "chart-3.0.3"],
 )
 def test_exact_recovery_coordinates_use_legacy_contract(coordinates: dict[str, object]) -> None:
-    assert (
-        verifier.identity_contract(dict(coordinates))
-        == verifier.LEGACY_IDENTITY_CONTRACT
-    )
+    assert verifier.identity_contract(dict(coordinates)) == verifier.LEGACY_IDENTITY_CONTRACT
 
 
 def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
@@ -2024,3 +2045,212 @@ def test_tag_only_runtime_exception_is_limited_to_exact_recovery_preflight(
     else:
         with pytest.raises(verifier.VerificationError, match="legacy recovery identity"):
             verifier.verify(args)
+
+
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+@pytest.mark.parametrize("field", list(verifier.HOTFIX_302_COORDINATES))
+def test_hotfix_coordinate_drift_never_selects_legacy(coordinates, field: str) -> None:
+    value = dict(coordinates)
+    value[field] = "drift"
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+@pytest.mark.parametrize(
+    "overrides, failure",
+    [
+        ({}, None),
+        ({"direct_meta": {"dspace-1": "{}"}}, "direct identity"),
+        ({"public_meta": "{}"}, "public identity"),
+        ({"direct_meta": {"dspace-2": '{"gitSha":"wrong"}'}}, "direct identity"),
+    ],
+)
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+def test_hotfix_build_meta_contract(monkeypatch, tmp_path, overrides, failure, coordinates) -> None:
+    args, seen = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        legacy=True,
+        provider="openai",
+        coordinates=coordinates,
+        overrides=overrides,
+    )
+    if failure:
+        with pytest.raises(verifier.VerificationError, match=failure):
+            verifier.verify(args)
+        return
+    result = verifier.verify(args)
+    assert result["runtimeSourceRevision"] == coordinates["sourceRevision"]
+    assert result["journeys"][0] == {"name": "/build-meta.json", "passed": True}
+    assert seen[-1][seen[-1].index("--identity-contract") + 1] == verifier.HOTFIX_IDENTITY_CONTRACT
+    assert seen[-1][seen[-1].index("--provider-config-contract") + 1] == "hotfix-openai-config-v1"
+    assert seen[-1][seen[-1].index("--expected-image-digest") + 1] == coordinates["imageDigest"]
+
+
+def hotfix_runner_proof(coordinates=None, **changes: object) -> str:
+    value = coordinates or verifier.HOTFIX_302_COORDINATES
+    proof = {
+        "method": "sha256-index-platform-config-version-label",
+        "applicationVersion": value["applicationVersion"],
+        "sourceRevision": value["sourceRevision"],
+        "imageDigest": value["imageDigest"],
+        "imageVersionLabel": f"v{value['applicationVersion']}+{value['sourceRevision'][:7]}",
+        **changes,
+    }
+    return verifier.ARTIFACT_PROOF_PREFIX + json.dumps(proof)
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {"direct_health": {"dspace-2": '{"status":"ready","version":"3.0.2"}'}},
+            "direct identity",
+        ),
+        ({"public_health": '{"status":"ready","version":"spoofed"}'}, "public health version"),
+        ({"chat_stdout": ""}, "artifact version proof"),
+        (
+            {"chat_stdout": hotfix_runner_proof(applicationVersion="3.0.1")},
+            "artifact version proof",
+        ),
+        ({"chat_stdout": hotfix_runner_proof(imageDigest=DIGEST)}, "artifact version proof"),
+        (
+            {"chat_stdout": hotfix_runner_proof() + "\n" + hotfix_runner_proof()},
+            "artifact version proof",
+        ),
+        ({"chat_returncode": 2, "chat_stdout": hotfix_runner_proof()}, "provider/chat smoke"),
+    ],
+)
+@pytest.mark.parametrize("coordinates", verifier.HOTFIX_IDENTITY_COORDINATES)
+def test_hotfix_rejects_health_drift_and_missing_or_invalid_artifact_proof(
+    monkeypatch, tmp_path, overrides, category, coordinates
+):
+    args, _ = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        legacy=True,
+        provider="openai",
+        coordinates=coordinates,
+        overrides=overrides,
+    )
+    with pytest.raises(verifier.VerificationError, match=category):
+        verifier.verify(args)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        (SENTINEL + "x" * (1024 * 1024)).encode(),
+        SENTINEL.encode(),
+        json.dumps([SENTINEL]).encode(),
+    ],
+)
+def test_hotfix_health_rejects_oversized_or_malformed_payload_without_leaking(payload):
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.hotfix_health(payload, "public health version", verifier.HOTFIX_302_COORDINATES)
+    assert str(raised.value) == "public health version"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [SENTINEL + "x" * (1024 * 1024), verifier.ARTIFACT_PROOF_PREFIX + SENTINEL],
+)
+def test_hotfix_artifact_proof_rejects_oversized_or_malformed_payload_without_leaking(payload):
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.hotfix_artifact_version(payload, verifier.HOTFIX_302_COORDINATES)
+    assert str(raised.value) == "artifact version proof"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    (verifier.HOTFIX_302_COORDINATES, verifier.HOTFIX_302_CHART_313_COORDINATES),
+)
+def test_historical_hotfix_labels_remain_unchanged(coordinates):
+    assert verifier.hotfix_version_label(coordinates, "identity") == "v3.0.2+4790074"
+
+
+@pytest.mark.parametrize(
+    "digest", [None, "", "sha256:" + "0" * 64, verifier.HOTFIX_302_COORDINATES["imageDigest"]]
+)
+def test_unpublished_changelog_source_cannot_inherit_hotfix_compatibility(digest):
+    # Missing, unknown, and predecessor digests are not the verified new tuple.
+    # A source revision alone never grants compatibility.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+        "imageTag": "hotfix-558ce3c35163d97aea5594d6aba430c6a3dde1a3",
+        "imageDigest": digest,
+    }
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) is None
+    with pytest.raises(verifier.VerificationError, match="health version"):
+        verifier.hotfix_health(
+            b'{"status":"ready","version":"v3.0.2+558ce3c"}', "health version", value
+        )
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_hotfix_label_uses_only_explicitly_allowlisted_test_coordinates(monkeypatch):
+    # Synthetic unit fixture only: no new image digest is being allowlisted.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "a" * 40,
+        "imageTag": "hotfix-" + "a" * 40,
+        "imageDigest": "sha256:" + "a" * 64,
+    }
+    monkeypatch.setattr(verifier, "HOTFIX_IDENTITY_COORDINATES", (value,))
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+aaaaaaa"
+    verifier.hotfix_health(b'{"status":"ready","version":"v3.0.2+aaaaaaa"}', "health", value)
+    with pytest.raises(verifier.VerificationError, match="health"):
+        verifier.hotfix_health(b'{"status":"ready","version":"v3.0.2+4790074"}', "health", value)
+    proof = hotfix_runner_proof(
+        sourceRevision=value["sourceRevision"],
+        imageDigest=value["imageDigest"],
+        imageVersionLabel="v3.0.2+aaaaaaa",
+    )
+    assert verifier.hotfix_artifact_version(proof, value) == "3.0.2"
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_november_tuple_uses_verified_chart_and_source_label():
+    value = verifier.HOTFIX_302_NOVEMBER_COORDINATES
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+558ce3c"
+    for field in ("chartVersion", "chartSourceRevision", "chartDigest"):
+        assert value[field] == verifier.HOTFIX_302_CHART_313_COORDINATES[field]
+    assert verifier.identity_contract(value) == verifier.HOTFIX_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) == "hotfix-openai-config-v1"
+
+
+@pytest.mark.parametrize(
+    "digest",
+    [None, "", "sha256:" + "0" * 64, verifier.HOTFIX_302_NOVEMBER_COORDINATES["imageDigest"]],
+)
+def test_final_candidate_rejects_missing_or_predecessor_digest(digest):
+    # Missing, unknown, and predecessor digests are not the verified new tuple.
+    # A source revision alone never grants compatibility.
+    value = {
+        **verifier.HOTFIX_302_CHART_313_COORDINATES,
+        "sourceRevision": "bfb910201e23119cb26902d8ca6787070150b695",
+        "imageTag": "hotfix-bfb910201e23119cb26902d8ca6787070150b695",
+        "imageDigest": digest,
+    }
+    assert verifier.identity_contract(value) == verifier.MODERN_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) is None
+    with pytest.raises(verifier.VerificationError, match="health version"):
+        verifier.hotfix_health(
+            b'{"status":"ready","version":"v3.0.2+bfb9102"}', "health version", value
+        )
+    with pytest.raises(verifier.VerificationError, match="artifact version proof"):
+        verifier.hotfix_artifact_version(hotfix_runner_proof(), value)
+
+
+def test_final_candidate_reuses_verified_chart_and_source_label():
+    value = verifier.HOTFIX_302_NOVEMBER15_COORDINATES
+    assert verifier.hotfix_version_label(value, "identity") == "v3.0.2+bfb9102"
+    for field in ("chartVersion", "chartSourceRevision", "chartDigest"):
+        assert value[field] == verifier.HOTFIX_302_CHART_313_COORDINATES[field]
+    assert verifier.identity_contract(value) == verifier.HOTFIX_IDENTITY_CONTRACT
+    assert verifier.provider_config_contract(value) == "hotfix-openai-config-v1"

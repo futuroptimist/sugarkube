@@ -123,6 +123,23 @@ jobs:
           set -euo pipefail
           sudo install -o root -g root -m 0555 trusted-workflow/.github/scripts/claude-validate.sh /usr/local/bin/sugarkube-claude-validate
 
+      - name: Install promtool
+        env:
+          PROMTOOL_VERSION: 3.5.0
+          PROMETHEUS_SHA256: e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
+        run: |
+          set -euo pipefail
+          # Keep download and extraction outside PR-controlled paths.
+          promtool_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$promtool_dir"' EXIT
+          cd "$promtool_dir"
+          archive="prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz"
+          curl -fsSLO "https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}/${archive}"
+          echo "${PROMETHEUS_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "${archive}" "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
+          sudo install "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
+          promtool --version
+
       - name: Checkout same-repository PR commit
         uses: actions/checkout@v4
         with:

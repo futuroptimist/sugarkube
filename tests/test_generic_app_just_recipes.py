@@ -634,6 +634,9 @@ chart = "sha256:" + os.environ.get("SUGARKUBE_STUB_RESOLVED_CHART", "2" * 64)
 platform = "sha256:" + "3" * 64
 image_config = "sha256:" + "4" * 64
 chart_config = "sha256:" + "5" * 64
+attestation = "sha256:" + "6" * 64
+empty_config = "sha256:" + "7" * 64
+attestation_case = os.environ.get("SUGARKUBE_STUB_ATTESTATION")
 sha = "abcdef0123456789abcdef0123456789abcdef01"
 args = sys.argv[1:]
 with Path({str(tmp_path / "commands.log")!r}).open("a", encoding="utf-8") as log:
@@ -657,13 +660,45 @@ elif args[:2] == ["manifest", "fetch"] and (
     ref.endswith("@" + image)
     or ("charts/dspace" not in ref and ref.endswith("@sha256:" + "9" * 64))
 ):
-    value = {{"manifests": [{{"digest": platform}}]}}
+    value = {{"manifests": [{{
+        "digest": platform,
+        "platform": {{"os": "linux", "architecture": "amd64"}},
+    }}]}}
+    if attestation_case:
+        descriptor = {{
+            "digest": attestation,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "platform": {{"os": "unknown", "architecture": "unknown"}},
+            "annotations": {{
+                "vnd.docker.reference.type": "attestation-manifest",
+                "vnd.docker.reference.digest": platform,
+            }},
+        }}
+        if attestation_case == "orphan":
+            descriptor["annotations"]["vnd.docker.reference.digest"] = "sha256:" + "f" * 64
+        elif attestation_case == "unmarked":
+            descriptor.pop("annotations")
+        value["manifests"].append(descriptor)
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + attestation):
+    value = {{
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "config": {{
+            "mediaType": "application/vnd.oci.empty.v1+json",
+            "digest": empty_config,
+        }},
+        "layers": [{{"mediaType": "application/vnd.in-toto+json", "digest": "sha256:" + "8" * 64}}],
+    }}
 elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + platform):
     value = {{"config": {{"digest": image_config}}}}
 elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + chart):
     value = {{"config": {{"digest": chart_config}}}}
 elif args[:2] == ["blob", "fetch"]:
-    value = {{"config": {{"Labels": {{"org.opencontainers.image.revision": sha}}}}}}
+    value = {{
+        "os": "linux", "architecture": "amd64",
+        "config": {{"Labels": {{"org.opencontainers.image.revision": sha}}}},
+    }}
+    if ref.endswith("@" + empty_config) and attestation_case != "runnable-config":
+        value = {{}}
 else:
     raise SystemExit("unexpected oras command: " + " ".join(args))
 print(json.dumps(value))
@@ -3559,9 +3594,12 @@ def test_dspace_release_verify_normalizes_public_arguments(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("attestations", [False, True])
 def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
-    tmp_path: Path, generic_app_stub_env: dict[str, str]
+    tmp_path: Path, generic_app_stub_env: dict[str, str], attestations: bool
 ) -> None:
+    if attestations:
+        generic_app_stub_env["SUGARKUBE_STUB_ATTESTATION"] = "valid"
     manifest = tmp_path / "candidate.json"
     evidence = tmp_path / "evidence.json"
     _write_dspace_candidate(manifest, "staging")
@@ -4127,6 +4165,42 @@ def test_dspace_digest_mismatch_stops_before_helm(
     assert expected_check in result.stderr
     helm_log = Path(env["HELM_LOG"])
     assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    "attestation_case,expected_check",
+    [
+        ("orphan", "reference a runnable"),
+        ("unmarked", "non-runnable platform"),
+        ("runnable-config", "attestation manifest or config"),
+    ],
+)
+def test_dspace_invalid_attestation_stops_before_reservation_or_helm(
+    tmp_path: Path,
+    generic_app_stub_env: dict[str, str],
+    attestation_case: str,
+    expected_check: str,
+) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate_path, "staging")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_ATTESTATION"] = attestation_case
+    result = _run_just(
+        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(candidate_path), str(evidence)],
+        env,
+    )
+    assert result.returncode != 0
+    assert expected_check in result.stderr
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "release-manifest reserve" not in commands
+    assert "helm template " not in commands
+    assert "helm upgrade " not in commands
+    assert "kubectl apply " not in commands
+    assert "kubectl patch " not in commands
+    assert not evidence.exists()
+    assert not Path(str(evidence.resolve()) + ".reservation").exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

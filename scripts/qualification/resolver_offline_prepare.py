@@ -3,9 +3,9 @@
 
 import hashlib
 import json
-from pathlib import Path
 import sys
 import zipfile
+from pathlib import Path
 
 if sys.flags.optimize:
     raise SystemExit(
@@ -14,7 +14,7 @@ if sys.flags.optimize:
 
 
 def prepare(bundle, destination):
-    assert not destination.exists()
+    assert not destination.is_symlink() and not destination.exists()
     manifest = json.loads((bundle / "python-dependencies.json").read_text(encoding="utf-8"))
     wheels = []
     for item in manifest["packages"]:
@@ -39,4 +39,4 @@ def prepare(bundle, destination):
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise SystemExit("Usage: resolver_offline_prepare.py BUNDLE NEW_DEPENDENCY_DIRECTORY")
-    prepare(Path(sys.argv[1]).resolve(strict=True), Path(sys.argv[2]).resolve())
+    prepare(Path(sys.argv[1]).resolve(strict=True), Path(sys.argv[2]).absolute())

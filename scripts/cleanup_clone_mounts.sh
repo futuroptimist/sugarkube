@@ -253,7 +253,7 @@ perform_cleanup() {
   fi
 }
 
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329  # Invoked indirectly by the EXIT trap.
 cleanup_handler() {
   local status=$?
   local final_status=$status

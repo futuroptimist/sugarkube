@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "origin": "synthetic",
+  "qualification": "not_qualified",
+  "artifact": {
+    "id": "synthetic-k3s-arm64",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "backup_version": "v1.34.5+k3s1",
+    "restore_version": "v1.34.5+k3s1"
+  },
+  "backup": {
+    "id": "synthetic-snapshot",
+    "kind": "scheduled_snapshot",
+    "provenance_ref": "synthetic-inventory"
+  },
+  "seed": {
+    "selected": [
+      "synthetic-node-a"
+    ],
+    "decision_ref": "synthetic-decision"
+  },
+  "recovery": "completed",
+  "measurements": {
+    "recovered_through_utc": "2026-10-01T00:00:00Z",
+    "incident_utc": "2026-10-01T00:10:00Z",
+    "started_utc": "2026-10-01T00:15:00Z",
+    "accepted_utc": "2026-10-01T00:45:00Z",
+    "rpo_seconds": 600,
+    "rto_seconds": 2100,
+    "rpo_objective_seconds": 900,
+    "rto_objective_seconds": 3600,
+    "evidence_ref": "synthetic-timing"
+  },
+  "gates": {
+    "backup_inventory": {
+      "status": "pass",
+      "evidence_ref": "synthetic-backup_inventory"
+    },
+    "backup_integrity": {
+      "status": "pass",
+      "evidence_ref": "synthetic-backup_integrity"
+    },
+    "backup_complete": {
+      "status": "pass",
+      "evidence_ref": "synthetic-backup_complete"
+    },
+    "storage_independence": {
+      "status": "pass",
+      "evidence_ref": "synthetic-storage_independence"
+    },
+    "access_without_api": {
+      "status": "pass",
+      "evidence_ref": "synthetic-access_without_api"
+    },
+    "token_available": {
+      "status": "pass",
+      "evidence_ref": "synthetic-token_available"
+    },
+    "token_matches_backup": {
+      "status": "pass",
+      "evidence_ref": "synthetic-token_matches_backup"
+    },
+    "config_reviewed": {
+      "status": "pass",
+      "evidence_ref": "synthetic-config_reviewed"
+    },
+    "version_supported": {
+      "status": "pass",
+      "evidence_ref": "synthetic-version_supported"
+    },
+    "isolation": {
+      "status": "pass",
+      "evidence_ref": "synthetic-isolation"
+    },
+    "all_servers_stopped": {
+      "status": "pass",
+      "evidence_ref": "synthetic-all_servers_stopped"
+    },
+    "seed_selection_approved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-seed_selection_approved"
+    },
+    "reset_approved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-reset_approved"
+    },
+    "restore_completed": {
+      "status": "pass",
+      "evidence_ref": "synthetic-restore_completed"
+    },
+    "seed_objects_verified": {
+      "status": "pass",
+      "evidence_ref": "synthetic-seed_objects_verified"
+    },
+    "peer_data_preserved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-peer_data_preserved"
+    },
+    "peer_moves_approved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-peer_moves_approved"
+    },
+    "sequential_rejoin": {
+      "status": "pass",
+      "evidence_ref": "synthetic-sequential_rejoin"
+    },
+    "membership_voters": {
+      "status": "pass",
+      "evidence_ref": "synthetic-membership_voters"
+    },
+    "api": {
+      "status": "pass",
+      "evidence_ref": "synthetic-api"
+    },
+    "addresses_tls": {
+      "status": "pass",
+      "evidence_ref": "synthetic-addresses_tls"
+    },
+    "leases_restarts": {
+      "status": "pass",
+      "evidence_ref": "synthetic-leases_restarts"
+    },
+    "pod_networking": {
+      "status": "pass",
+      "evidence_ref": "synthetic-pod_networking"
+    },
+    "objects": {
+      "status": "pass",
+      "evidence_ref": "synthetic-objects"
+    },
+    "pvc_data": {
+      "status": "pass",
+      "evidence_ref": "synthetic-pvc_data"
+    },
+    "application_journeys": {
+      "status": "pass",
+      "evidence_ref": "synthetic-application_journeys"
+    },
+    "acknowledged_writes": {
+      "status": "pass",
+      "evidence_ref": "synthetic-acknowledged_writes"
+    },
+    "monitoring_reference": {
+      "status": "pass",
+      "evidence_ref": "synthetic-monitoring_reference"
+    },
+    "rollback_reviewed": {
+      "status": "pass",
+      "evidence_ref": "synthetic-rollback_reviewed"
+    },
+    "operator_acceptance": {
+      "status": "pass",
+      "evidence_ref": "synthetic-operator_acceptance"
+    },
+    "data_restore_approved": {
+      "status": "pass",
+      "evidence_ref": "synthetic-data-restore-approval"
+    }
+  }
+}

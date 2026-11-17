@@ -1,0 +1,5 @@
+# Final dated v3.0.2 candidate; append after the staging values overlay.
+# Compatibility only: fresh staging acceptance and owner rollout approval required.
+runtimeVersion: v3.0.2+bfb9102
+chat:
+  defaultProvider: openai

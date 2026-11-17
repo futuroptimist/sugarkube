@@ -268,14 +268,10 @@ If the cache is stale, compare `generatedAt` and `expiresAt` in the JSON payload
 
 Do not configure a GitHub token, placeholder token, Kubernetes Secret, or `envFrom` Secret for this public stars cache. Secret-management recipes are out of scope for this flow and should only be added if a future authenticated feature is explicitly approved.
 
-Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Use a non-interactive login so recovery works in copy-paste shells; `gh auth token` must have package read access for private packages.
-
-```bash
-HELM_STDIN_FLAG="--pass""word-stdin"
-gh auth token | helm registry login ghcr.io \
-  --username "$(gh api user --jq .login)" \
-  "$HELM_STDIN_FLAG"
-```
+Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Follow the
+[GHCR authentication and PAT renewal runbook](../ghcr_authentication.md) to identify
+Helm/ORAS consumers, enter a replacement PAT privately, and verify required packages.
+`gh auth token` selects the current GitHub CLI credential, not a newly created PAT.
 
 Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.
 

@@ -450,6 +450,78 @@ model expectations come from the ordered values chain. For `openai`, those argum
 OpenAI remains discoverable and missing-key gated without a real key. Standalone production
 verification uses the same command with `env=prod` and a production candidate or final record.
 
+### Exact v3.0.2 hotfix identity contract
+
+The hotfix at source `47900748f61e1ef38c6289fc697f7a070f7fa3c9` uses the full tag
+`hotfix-47900748f61e1ef38c6289fc697f7a070f7fa3c9` and image index
+`sha256:5d16cde03df4cfe9a52341c26bb6167234d315f896d422af38383b760bebcfe0`.
+Only the complete hotfix/chart/provider tuples in `HOTFIX_IDENTITY_COORDINATES` select
+`hotfix-build-meta-oci-v1` and `hotfix-openai-config-v1`. All existing image, chart,
+environment, readiness, rollback, and finalization checks remain required.
+
+This contract requires the companion DSPACE runner. It validates a digest-bound OCI
+index and both platform configs, extracts application version `3.0.2` from the immutable
+version label `v3.0.2+4790074`, verifies the full runtime source revision, and proves the
+OpenAI default through the isolated browser submission journey. It does not treat a
+runtime environment variable or a caller-supplied manifest version as artifact proof.
+Sugarkube requires the runner's successful `DSPACE_ARTIFACT_VERSION_PROOF` result and
+rejects missing, duplicate, or mismatched proof. Every direct pod and the public health
+endpoint must also agree with `v3.0.2+4790074`; this is a separate configuration check.
+
+The offline cross-repository regression executes the real runner's argument and contract
+validators. Run it with `DSPACE_RUNNER_CHECKOUT` pointing to the pinned companion checkout:
+
+```bash
+DSPACE_RUNNER_CHECKOUT=/path/to/dspace pytest -q tests/test_dspace_hotfix_runner_integration.py
+```
+
+Chart 3.1.3 adds the explicit runtime-version override required by this hotfix.
+Its published source is `2d2c4c7d384d5da270a94654a87c71a5bdfd0420`, and its OCI digest is
+`sha256:ee1a6bcdd5f601d473e81ea42c8dfb4055fa0016e7c4fd5fcd163ef3dba7a366`.
+The archive digest is
+`sha256:a510404755d093f9698549f8af1b5d1869bc404ab0fb47e58af956307d95f4b4`.
+[Publication run 42975610091](https://github.com/democratizedspace/dspace/actions/runs/42975610091)
+verified the packaged provenance and published OCI coordinate. The chart's `appVersion`
+and default image remain 3.1.0; they do not select the application for this hotfix.
+
+Use `config=docs/examples/apps/dspace-hotfix-302.env` for bounded staging verification
+of the final dated candidate, not as production approval. It selects chart 3.1.3
+and appends `runtimeVersion: v3.0.2+bfb9102` and `chat.defaultProvider: openai`.
+The exact source is `bfb910201e23119cb26902d8ca6787070150b695`, with index
+`sha256:e9331b4319a9d475b910be6265613202a93d133fe33a8c6685dd962746a8e485`
+and arm64 manifest
+`sha256:32fc5c8ccc31ac57d9f915527a22ed82143f44ae2752a25b441c87372d7228ce`.
+All historical image/chart tuples remain supported with their matching runtime
+labels; preserve their finalized evidence and rollback configuration.
+
+[Publication run 43777310401](https://github.com/democratizedspace/dspace/actions/runs/43777310401)
+pushed this immutable image but failed its post-push registry token read. Its
+original receipt records `published: true`, `verified: false`, and no completed
+smokes. Do not rerun the publisher. The companion authenticates the original OCI
+index/platform/config bytes and both source/version labels; that metadata proof
+is not runtime acceptance.
+
+The integration workflow pins actual [DSPACE PR #4879](https://github.com/democratizedspace/dspace/pull/4879)
+head `ee6695a1eb140a01c7588017c290cec2e4b7f22e`, tree
+`f8f380061263ade633aa94642d7753ff261c92ff`, not a speculative merge SHA.
+Its 136 focused local contract tests passed. Check that PR's final-head CI and
+reviews before readiness; if its head changes, recheck the tree, refresh the pin
+and rerun the integration. The existing integration exercises all four supported
+image/chart tuples against the real pinned companion.
+
+Use a fresh candidate/evidence packet and the existing bounded staging
+runtime/health verification, reusing earlier broad functional acceptance. No new
+recovery workflow or broad qualification campaign is required. The date is
+November 15 in the candidate changelog; a successful metadata check does not
+establish a production release. Owner approval and production rollback evidence
+remain separate gates. Supply the exact image tag and candidate manifest through
+the existing release workflow. This config intentionally has no production
+values chain; shared chart pins and staging/production defaults are unchanged.
+
+The old chart 3.0.3 compatibility tuple remains supported for historical evidence;
+its source render cannot supply the required hotfix health version. No compatibility
+tuple grants rollout authority or replaces successful staging verification before production.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.
@@ -929,14 +1001,10 @@ Review logs with the compatibility debug helper.
 just dspace-debug-logs-env env=staging
 ```
 
-Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Use a non-interactive login so recovery works in copy-paste shells; `gh auth token` must have package read access for private packages.
-
-```bash
-HELM_STDIN_FLAG="--pass""word-stdin"
-gh auth token | helm registry login ghcr.io \
-  --username "$(gh api user --jq .login)" \
-  "$HELM_STDIN_FLAG"
-```
+Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Follow the
+[GHCR authentication and PAT renewal runbook](../ghcr_authentication.md) to identify
+Helm/ORAS consumers, enter a replacement PAT privately, and verify required packages.
+`gh auth token` selects the current GitHub CLI credential, not a newly created PAT.
 
 Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.
 

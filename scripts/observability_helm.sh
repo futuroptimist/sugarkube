@@ -214,7 +214,7 @@ grafana_secret_check() {
 }
 grafana_secret_install() (
   local credential_name grafana_admin_user="" grafana_admin_password="" grafana_admin_confirmation=""
-  # shellcheck disable=SC2317  # Invoked indirectly by the EXIT trap on every exit path.
+  # shellcheck disable=SC2317,SC2329  # Invoked indirectly by the EXIT trap.
   cleanup_grafana_credentials() {
     exec 3<&- 2>/dev/null || true
     unset grafana_admin_user grafana_admin_password grafana_admin_confirmation
@@ -520,7 +520,7 @@ MANUAL CHECKPOINT: confirm Healthchecks has a recent watchdog ping before disrup
 EOF2
   silence_tmp="$(mktemp -d -t sugarkube-watchdog-silence.XXXXXX)"
   chmod 700 "${silence_tmp}"
-  # shellcheck disable=SC2317
+  # shellcheck disable=SC2317,SC2329  # Invoked indirectly by the EXIT trap.
   cleanup_watchdog_silence() {
     if [[ -n "${silence_pid}" && " $(jobs -pr) " == *" ${silence_pid} "* ]]; then
       kill "${silence_pid}" 2>/dev/null || true
@@ -861,7 +861,7 @@ print(end.isoformat(timespec="seconds").replace("+00:00", "Z"))')"
   test_tmp="$(mktemp -d -t sugarkube-alertmanager-test.XXXXXX)"
   chmod 700 "${test_tmp}"
   # Return 19 specifically when the owned port-forward cannot be established.
-  # shellcheck disable=SC2317
+  # shellcheck disable=SC2317,SC2329  # Invoked indirectly by the EXIT trap.
   cleanup_pagerduty_test() {
     if [[ -n "${test_pid}" && " $(jobs -pr) " == *" ${test_pid} "* ]]; then
       kill "${test_pid}" 2>/dev/null || true
@@ -944,7 +944,7 @@ dashboard_verify() (
   verify_tmp="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
   chmod 700 "${verify_tmp}"
   # The EXIT trap invokes this cleanup callback indirectly.
-  # shellcheck disable=SC2317
+  # shellcheck disable=SC2317,SC2329  # Invoked indirectly by the EXIT trap.
   cleanup_dashboard_verify() {
     if [[ -n "${verify_pid}" && " $(jobs -pr) " == *" ${verify_pid} "* ]]; then
       kill "${verify_pid}" 2>/dev/null || true

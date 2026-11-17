@@ -675,44 +675,30 @@ response status code 403: denied: denied
 
 **Recovery steps (operator sequence):**
 
-1. **Create or reuse a valid PAT** with at least `read:packages` for the account that can access the
-   chart.
-2. **Clear Helm's current GHCR session:**
-
-   ```bash
-   helm registry logout ghcr.io || true
-   ```
-
-3. **If failures persist, clear stale Helm registry config** (Helm will recreate it on next
-   login). **Warning: this removes ALL OCI registry credentials, not just GHCR — re-login to
-   any other registries you use after this step.**
-
-   ```bash
-   rm -f ~/.config/helm/registry/config.json
-   ```
-
-4. **Login again with `--password-stdin`** (matching the auth flow used elsewhere in these
-   docs):
-
-   ```bash
-   export GHCR_USERNAME="<github-username>"
-   export GHCR_PAT="<pat-with-read-packages>"
-   printf '%s\n' "${GHCR_PAT}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
-   ```
-
-5. **Verify direct chart pull before rerunning `just`:**
-
-   ```bash
-   helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>
-   ```
-
-6. **Rerun the original deploy/upgrade command** (for example `just helm-oci-install ...`).
+1. Follow [GHCR authentication and PAT renewal](ghcr_authentication.md). Identify
+   the actual Helm/ORAS config and account before changing credentials; a GHCR
+   entry in a file alone does not prove it is used.
+2. Create a separate classic PAT with only `read:packages` for pull access. Check
+   prerequisites before hidden input, then use `--password-stdin` with the
+   explicitly selected registry config. Do not paste a PAT into shell exports.
+3. Verify the pinned chart and any needed images using the runbook's read-only
+   checks. Do not rerun a deploy/upgrade just to test authentication.
+4. If a step fails, stop and retain the old token where still valid. Successful
+   earlier writes remain changed; check each consumer independently. Do not
+   delete the entire registry config or remove unrelated credentials.
+5. Retire the old token only after all consumers are confirmed migrated, then
+   verify again and record the replacement expiry reminder privately.
 
 **Where stale credentials often hide:**
 
-- `~/.config/helm/registry/config.json`
-- shell profile exports (`~/.bashrc`, `~/.profile`, etc.)
-- local operator notes or helper scripts that set outdated `GHCR_PAT` values
+- Helm's effective `HELM_REGISTRY_CONFIG` or explicit `--registry-config` path.
+- ORAS's Docker-compatible config, `DOCKER_CONFIG`, or explicit config path.
+- Credential helpers, service environments, and other operating-system users.
+- Shell profiles or old helper scripts that still select an earlier credential.
+- Separately managed node registry settings or Kubernetes image-pull secrets.
+
+Do not print credential values while investigating. GitHub CLI's `gh auth token`
+returns its selected credential, which may still be the old token.
 
 ---
 

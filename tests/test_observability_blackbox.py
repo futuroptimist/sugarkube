@@ -6,7 +6,9 @@ import runpy
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -51,6 +53,9 @@ def expected_names(environment="staging"):
     ]
 
 
+EVALUATION_TIME = 1792108800
+
+
 def verifier_bundle(health="up", success="1", environment="staging"):
     pairs = [
         (name, name.removeprefix("blackbox-").split(f"-{environment}-"))
@@ -65,6 +70,7 @@ def verifier_bundle(health="up", success="1", environment="staging"):
                 "environment": environment,
             },
             "health": health,
+            "lastScrape": "2026-10-16T00:00:00Z",
         }
         for name, pair in pairs
     ]
@@ -88,7 +94,7 @@ def verifier_bundle(health="up", success="1", environment="staging"):
                             "route": pair[1],
                             "environment": environment,
                         },
-                        "value": [1, success if family == "probe_success" else "2"],
+                        "value": [EVALUATION_TIME, success if family == "probe_success" else "2"],
                     }
                     for name, pair in pairs
                 ],
@@ -233,6 +239,13 @@ elif "--raw" in joined:
     else:
         family = next(name for name in bundle["metrics"] if name in joined)
         payload = bundle["metrics"][family]
+    if scenario == "persistent_pending" or (scenario == "pending_then_fresh" and count < 6):
+        if "targets?" in joined:
+            target = payload["data"]["activeTargets"][0]
+            target["health"] = "unknown"
+            target["lastScrape"] = "0001-01-01T00:00:00Z"
+        else:
+            payload["data"]["result"].pop(0)
     print(json.dumps(payload))
 """
 
@@ -242,6 +255,8 @@ if len(sys.argv) > 1 and sys.argv[1].endswith("cluster_identity.py"):
     with open(os.environ["LOG"], "a") as log: log.write("identity " + " ".join(sys.argv[2:]) + "\n")
     if os.environ.get("SCENARIO") == "bad_identity": sys.exit(1)
     sys.exit(0)
+if len(sys.argv) > 1 and sys.argv[1].endswith("verify_blackbox_prometheus.py"):
+    sys.argv.extend(["--evaluation-time", "1792108800"])
 os.execv(os.environ["REAL_PYTHON"], [os.environ["REAL_PYTHON"], *sys.argv[1:]])
 """
 
@@ -531,7 +546,9 @@ def test_wrong_release_state_rejects_mutation(scenario, command, state):
     assert not mutations(scenario.log)
 
 
-@pytest.mark.parametrize("command,state", [("install", "release_absent"), ("upgrade", "stale_prod")])
+@pytest.mark.parametrize(
+    "command,state", [("install", "release_absent"), ("upgrade", "stale_prod")]
+)
 def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, command, state):
     result = scenario.run(
         command,
@@ -561,9 +578,7 @@ def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, com
     assert "release=kube-prometheus-stack,environment=prod -o json" in selector
     if command == "upgrade":
         assert delete == (
-            "kubectl -n monitoring delete probe "
-            + " ".join(STALE_PROD)
-            + " --ignore-not-found"
+            "kubectl -n monitoring delete probe " + " ".join(STALE_PROD) + " --ignore-not-found"
         )
         assert scenario.log.index(applies[1]) < scenario.log.index(delete)
     else:
@@ -713,7 +728,11 @@ def verify(payload, final=False, *args, environment="staging"):
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+            patch("time.time", return_value=EVALUATION_TIME),
+        ):
             try:
                 runpy.run_path(sys.argv[0], run_name="__main__")
             except SystemExit as error:
@@ -976,8 +995,7 @@ def test_production_probe_matrix_exact_and_separate():
         for item in staging
     }
     assert {
-        (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"])
-        for item in prod
+        (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"]) for item in prod
     } == production_keys
     for item in prod:
         labels = item["metadata"]["labels"]
@@ -1075,3 +1093,264 @@ def test_verifier_requires_explicit_supported_environment():
             assert error.value.code == 9
         finally:
             sys.argv, sys.stdin = old_argv, old_stdin
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+@pytest.mark.parametrize("age,code", [(0, 0), (120, 0), (120.001, 10), (-0.001, 9)])
+@pytest.mark.parametrize("source", ["scrape", "vector"])
+def test_evidence_age_boundaries(environment, age, code, source):
+    payload = verifier_bundle(environment=environment)
+    timestamp = EVALUATION_TIME - age
+    if source == "scrape":
+        payload["targets"]["data"]["activeTargets"][0]["lastScrape"] = datetime.fromtimestamp(
+            timestamp, timezone.utc
+        ).isoformat()
+    else:
+        payload["metrics"]["probe_success"]["data"]["result"][0]["value"][0] = timestamp
+    assert verify(payload, environment=environment).returncode == code
+
+
+@pytest.mark.parametrize("timestamp", [None, True, "1792108800", 0, -1, float("nan"), float("inf")])
+def test_vector_timestamp_fails_closed(timestamp):
+    payload = verifier_bundle()
+    payload["metrics"]["probe_success"]["data"]["result"][0]["value"][0] = timestamp
+    assert verify(payload).returncode == 9
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        None,
+        "",
+        1792108800,
+        "2026-10-16T00:00:00",
+        "2026-02-30T00:00:00Z",
+        "NaN",
+        "0001-01-01T00:00:00Z",
+        "https://private.invalid/secret",
+    ],
+)
+def test_scrape_timestamp_fails_closed_without_leaking_input(timestamp):
+    payload = verifier_bundle()
+    target = payload["targets"]["data"]["activeTargets"][0]
+    if timestamp is None:
+        target.pop("lastScrape")
+    else:
+        target["lastScrape"] = timestamp
+    result = verify(payload)
+    assert result.returncode == 9
+    assert "private.invalid" not in result.stderr
+    assert "secret" not in result.stderr
+
+
+@pytest.mark.parametrize("family", sorted(verifier_bundle()["metrics"]))
+@pytest.mark.parametrize("value", ["NaN", "Inf", "+Inf", "-Inf", "1e999"])
+def test_every_metric_family_rejects_nonfinite_values(family, value):
+    payload = verifier_bundle()
+    payload["metrics"][family]["data"]["result"][0]["value"][1] = value
+    assert verify(payload).returncode == 9
+
+
+@pytest.mark.parametrize("option", ["--evaluation-time", "--max-age-seconds"])
+@pytest.mark.parametrize("value", ["0", "-1", "NaN", "Inf", "invalid", "1e999"])
+def test_invalid_freshness_options(option, value):
+    assert verify(verifier_bundle(), False, option, value).returncode == 9
+
+
+def test_explicit_replay_and_age_contract():
+    payload = verifier_bundle()
+    assert verify(payload, False, "--evaluation-time", str(EVALUATION_TIME + 121)).returncode == 10
+    result = verify(
+        payload,
+        False,
+        "--evaluation-time",
+        str(EVALUATION_TIME + 121),
+        "--max-age-seconds",
+        "121",
+        "--report-json",
+    )
+    assert result.returncode == 0
+    report = json.loads(result.stdout)
+    assert report["evaluation_time"] == EVALUATION_TIME + 121
+    assert report["max_age_seconds"] == 121
+    assert report["blackbox_evidence"] == "fresh_success"
+    assert report["external_resolution"] == "not_evaluated"
+    assert report["alertmanager_delivery"] == "not_evaluated"
+    assert report["application_user_journeys"] == "not_evaluated"
+
+
+def test_recent_monitoring_does_not_override_failed_application_probe():
+    result = verify(verifier_bundle(success="0"), True, "--report-json")
+    assert result.returncode == 10
+    assert result.stdout == ""
+    assert '"probe_success": "down"' in result.stderr
+
+
+def test_report_does_not_claim_node_or_control_plane_recovery():
+    result = verify(verifier_bundle(), False, "--report-json")
+    report = json.loads(result.stdout)
+    assert report["node_reachability"] == "not_evaluated"
+    assert report["api_member_health"] == "not_evaluated"
+    assert "https://" not in result.stdout
+
+
+@pytest.mark.parametrize("family", sorted(verifier_bundle()["metrics"]))
+def test_every_metric_family_requires_recent_timestamp(family):
+    payload = verifier_bundle()
+    payload["metrics"][family]["data"]["result"][0]["value"][0] -= 121
+    result = verify(payload, False, "--report-json")
+    assert result.returncode == 10
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("timestamp", ["2026-10-16T00:00:00+00:99", "2026-10-16T00:00:00+24:00"])
+def test_scrape_timezone_offset_is_valid_rfc3339(timestamp):
+    payload = verifier_bundle()
+    payload["targets"]["data"]["activeTargets"][0]["lastScrape"] = timestamp
+    assert verify(payload).returncode == 9
+
+
+@pytest.mark.parametrize("source", ["scrape", "vector"])
+def test_lifecycle_wrapper_retries_stale_evidence_then_fails(scenario, source):
+    path = Path(scenario.env["PROM_JSON"])
+    payload = json.loads(path.read_text())
+    if source == "scrape":
+        payload["targets"]["data"]["activeTargets"][0]["lastScrape"] = "2026-10-15T23:57:59Z"
+    else:
+        payload["metrics"]["probe_success"]["data"]["result"][0]["value"][0] -= 121
+    path.write_text(json.dumps(payload))
+    result = scenario.run("verify")
+    assert result.returncode == 10
+    assert "is stale" in result.stderr
+    assert "did not converge before timeout" in result.stderr
+    rows = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    labels = payload["targets"]["data"]["activeTargets"][0]["labels"]
+    row = next(
+        row for row in rows if row["app"] == labels["app"] and row["route"] == labels["route"]
+    )
+    assert row["stale_evidence"] == ["lastScrape" if source == "scrape" else "probe_success"]
+    assert row["probe_success"] == "unknown"
+    assert "retrying" in result.stderr
+    assert "are healthy" not in result.stdout
+    assert not mutations(scenario.log)
+
+
+def test_regained_node_heartbeat_cannot_replace_missing_monitoring_target():
+    payload = verifier_bundle()
+    targets = payload["targets"]["data"]["activeTargets"]
+    targets.pop()
+    targets.append({"labels": {"job": "node-heartbeat"}, "health": "up"})
+    result = verify(payload, True, "--report-json")
+    assert result.returncode == 10
+    assert result.stdout == ""
+    assert '"health": "missing"' in result.stderr
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+@pytest.mark.parametrize("state,code", [("pending_then_fresh", 0), ("persistent_pending", 10)])
+def test_lifecycle_wrapper_retries_never_scraped_targets(scenario, environment, state, code):
+    result = scenario.run(
+        "verify",
+        environment,
+        SCENARIO=state,
+        KUBECONFIG=scenario.root / "prod.config" if environment == "prod" else "",
+    )
+    assert result.returncode == code
+    assert "retrying" in result.stderr
+    assert sum("/api/v1/targets?state=active" in line for line in scenario.log) == 2
+    assert sum(line.startswith("sleep ") for line in scenario.log) == 1
+    if code == 0:
+        assert "are healthy" in result.stdout
+    else:
+        assert "are healthy" not in result.stdout
+        assert "did not converge before timeout" in result.stderr
+        assert '"health": "unknown"' in result.stderr
+        assert '"series": "missing"' in result.stderr
+    assert not mutations(scenario.log)
+
+
+@pytest.mark.parametrize("health,code", [("unknown", 10), ("up", 9), ("down", 9)])
+def test_never_scraped_sentinel_requires_unknown_health(health, code):
+    payload = verifier_bundle()
+    target = payload["targets"]["data"]["activeTargets"][0]
+    target.update(health=health, lastScrape="0001-01-01T00:00:00Z")
+    result = verify(payload, True, "--report-json")
+    assert result.returncode == code
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("invalid", ["malformed", "future", "nonfinite", "stale"])
+def test_pending_target_does_not_bypass_other_evidence_checks(invalid):
+    payload = verifier_bundle()
+    target = payload["targets"]["data"]["activeTargets"][0]
+    target.update(health="unknown", lastScrape="0001-01-01T00:00:00Z")
+    sample = payload["metrics"]["probe_duration_seconds"]["data"]["result"][1]
+    if invalid == "malformed":
+        sample["value"][0] = None
+    elif invalid == "future":
+        sample["value"][0] += 1
+    elif invalid == "nonfinite":
+        sample["value"][1] = "NaN"
+    else:
+        sample["value"][0] -= 121
+    result = verify(payload, False, "--report-json")
+    assert result.returncode == (10 if invalid == "stale" else 9)
+    assert "probe_duration_seconds" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_stale_timeout_reports_all_owned_evidence_without_private_payloads(environment):
+    payload = verifier_bundle(environment=environment)
+    targets = payload["targets"]["data"]["activeTargets"]
+    for target in targets:
+        target["lastScrape"] = "2026-10-15T23:57:59Z"
+        target["scrapeUrl"] = "https://private.invalid/secret"
+    targets[0]["health"] = "private-health-secret"
+    for family in payload["metrics"].values():
+        for sample in family["data"]["result"]:
+            sample["value"][0] -= 121
+            sample["metric"]["instance"] = "private-instance-secret"
+    result = verify(payload, True, "--report-json", environment=environment)
+    assert result.returncode == 10
+    assert result.stdout == ""
+    assert "did not converge before timeout" in result.stderr
+    rows = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    assert len(rows) == len(targets)
+    assert len(result.stderr.splitlines()) <= len(targets) + 2
+    expected_fields = sorted(["lastScrape", *payload["metrics"]])
+    for row in rows:
+        assert row["stale_evidence"] == expected_fields
+        assert row["probe_success"] == "unknown"
+        assert row["environment"] == environment
+    assert any(row["health"] == "invalid" for row in rows)
+    for private in ("private", "secret", "https://", "2026-10-15"):
+        assert private not in result.stderr
+
+
+@pytest.mark.parametrize("source", ["scrape", "vector"])
+@pytest.mark.parametrize(
+    "invalid", ["target_missing", "target_future", "sample_missing", "sample_future", "nan", "inf"]
+)
+def test_stale_evidence_does_not_hide_later_invalid_evidence(source, invalid):
+    payload = verifier_bundle()
+    targets = payload["targets"]["data"]["activeTargets"]
+    samples = payload["metrics"]["probe_success"]["data"]["result"]
+    if source == "scrape":
+        targets[0]["lastScrape"] = "2026-10-15T23:57:59Z"
+    else:
+        samples[0]["value"][0] -= 121
+    if invalid == "target_missing":
+        targets[1].pop("lastScrape")
+    elif invalid == "target_future":
+        targets[1]["lastScrape"] = "2026-10-16T00:00:01Z"
+    elif invalid == "sample_missing":
+        samples[1]["value"][0] = None
+    elif invalid == "sample_future":
+        samples[1]["value"][0] += 1
+    else:
+        samples[0]["value"][1] = "NaN" if invalid == "nan" else "Inf"
+    result = verify(payload, True, "--report-json")
+    assert result.returncode == 9
+    assert result.stdout == ""
+    assert "did not converge" not in result.stderr

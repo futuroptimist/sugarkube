@@ -14,6 +14,8 @@ Pi cluster and aquarium aerator while the frame supports climbing plants.*
 ## Getting Started
 Review the safety notes before working with power components.
 
+- [CVE-2026-98432 assessment](cve-2026-98432-assessment.md) — host kernel evidence gaps
+  and proposed staging-first response; documentation only
 - [Axel database platform design](design/axel-database-platform.md) — proposed K269/P6 tenant,
   storage, recovery and security boundaries; documentation only
 - [start-here.md](start-here.md) — orientation tracks for newcomers
@@ -28,6 +30,8 @@ Review the safety notes before working with power components.
 - [mac_mini_station.md](mac_mini_station.md) — press-fit cap for the Mac mini keyboard station
 - [electronics_schematics.md](electronics_schematics.md) — KiCad and Fritzing designs
 - [pi_image_quickstart.md](pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
+- [Offline image verification and target planning](design/offline-image-verification-and-target-planning.md)
+  — proposed offline verifier and synthetic target design
 - [pi_smoke_test.md](pi_smoke_test.md) — run remote smoke tests against freshly provisioned Pis
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
   they inform
@@ -53,6 +57,7 @@ Review the safety notes before working with power components.
 - [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and generic command contract
 - [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist and release decision tree for wove, jobbot3000, and later apps
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — legacy token.place-specific onboarding context
+- [ghcr_authentication.md](ghcr_authentication.md) — GHCR login, PAT renewal, consumer inventory, and read-only verification
 - [apps/dspace.md](apps/dspace.md) — DSPACE GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace.md](apps/tokenplace.md) — token.place GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI staging/prod operations guide
