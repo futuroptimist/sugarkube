@@ -1,0 +1,21 @@
+# Reviewed proposal only. Embed solely in the newly approved disposable image.
+# Bundle must be verified/extracted at /opt/resolver-lifecycle-bundle before boot.
+[Unit]
+Description=Disposable Sugarkube resolver qualification
+After=local-fs.target systemd-resolved.service
+ConditionHost=sugarkube-lifecycle-proof-v1
+ConditionPathExists=!/var/lib/sugarkube-qualification-evidence
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/resolver-lifecycle-bundle/source/scripts/qualification/resolver_oneshot.py --run-approved /opt/resolver-lifecycle-bundle
+Restart=no
+TimeoutStartSec=infinity
+TimeoutStopSec=10
+SendSIGKILL=no
+KillMode=process
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

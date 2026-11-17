@@ -1,0 +1,12 @@
+{
+  "id": "ubuntu-network-log-path-2026-10-17",
+  "date": "2026-10-17",
+  "component": "Ethernet preparation and controller refresh logging",
+  "rootCause": "Qualification on isolated VMware Ubuntu 24.04.5 guests at c9906726c0aed61eabe5fe317f54728abbec0b22 found /var/log mode0775 uid0 gid102. Running the default scripts/configure_k3s_node_ip.sh preparation rejected the /var/log/sugarkube log ancestor with Untrusted pre-start installation ownership or permissions. No K3s service/database had been created. The guard is correct; choosing a distribution-dependent group-writable ancestor for the default path was incompatible. The controller also passed that old path explicitly.",
+  "resolution": "Use /var/lib/sugarkube/logs in both the helper default and controller refresh, following existing Sugarkube application-state conventions. Preserve all ownership/mode/symlink guards and system permissions. Regression tests model root-trusted ancestry plus mode0775 var/log, verify preparation and installed-hook boot on the application path, reject an explicit unsafe override, and require --prepare-server for existing managed-hook migration while retaining logs/data and avoiding reload/restart. Ubuntu VM retest and wider distribution qualification remain outstanding. Reproduce only on an authorized isolated guest: inspect stat -c %a:%u:%g /var/log, then run preparation from the affected revision with SUGARKUBE_LOG_DIR unset.",
+  "references": [
+    "docs/ethernet-dhcp-recovery.md",
+    "tests/scripts/test_k3s_discover_node_ip_binding.py",
+    "tests/test_ethernet_quorum_recover.py"
+  ]
+}

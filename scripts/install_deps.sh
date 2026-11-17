@@ -31,6 +31,10 @@ apt_packages=(
   jq
   curl
   python3
+  python3-yaml
+  python3-grpcio
+  python3-protobuf
+  python3-dnslib
   tcpdump
   nftables
 )

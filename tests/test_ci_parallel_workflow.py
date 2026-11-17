@@ -61,7 +61,7 @@ def test_ci_retains_shared_dependency_and_service_setup():
     assert step("python", "Set up Python")["with"] == {"python-version": "3.x"}
     assert step("python", "Install Python test deps")["run"].splitlines() == [
         "python -m pip install --upgrade pip",
-        "pip install pytest pytest-cov pyyaml",
+        "pip install pytest pytest-cov pyyaml " "grpcio==1.84.0 protobuf==7.36.2 dnslib==0.9.26",
     ]
     packages = step("python", "Install bats and mDNS dependencies")["run"]
     assert packages.replace("\\\n", " ").split() == [
@@ -140,6 +140,25 @@ def test_ci_keeps_full_test_inventories_and_coverage_arguments():
         item.get("name") == "Build and install kcov"
         for item in workflow()["jobs"]["python"]["steps"]
     )
+
+
+def test_ci_keeps_pinned_disposable_etcd_in_python_lane():
+    name = "Install pinned disposable etcd test binary"
+    install = step("python", name)
+    assert install["env"] == {
+        "ETCD_VERSION": "3.6.7",
+        "ETCD_SHA256": "cf8af880c5a01ee5363cefa14a3e0cb7e5308dcf4ed17a6973099c9a7aee5a9a",
+    }
+    assert "if" not in install and "continue-on-error" not in install
+    names = [item.get("name") for item in workflow()["jobs"]["python"]["steps"]]
+    assert names.count(name) == 1
+    assert names.index(name) < names.index("Run Python tests with coverage")
+    assert not any(item.get("name") == name for item in workflow()["jobs"]["bash"]["steps"])
+    commands = install["run"].splitlines()
+    checksum = 'echo "${ETCD_SHA256}  ${test_dir}/${archive}" | sha256sum --check'
+    unpack = next(line for line in commands if line.startswith("tar -xzf "))
+    assert commands.index(checksum) < commands.index(unpack)
+    assert commands[-1] == ('echo "SUGARKUBE_TEST_ETCD_BINARY=${test_dir}/etcd" >> "$GITHUB_ENV"')
 
 
 @pytest.mark.parametrize(

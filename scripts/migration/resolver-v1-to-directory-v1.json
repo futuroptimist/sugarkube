@@ -1,0 +1,42 @@
+{
+  "artifacts": {
+    "source": {
+      "runtime_sha256": {
+        "/usr/local/libexec/sugarkube/ethernet-etcd.desc": "4ff408bd7b84e57c41b0504831efe7c4d16eb9a27ecd06d970dd55a85f67ff9d",
+        "/usr/local/libexec/sugarkube/ethernet-quorum-recover.py": "51f4a7015bc81fd0ea5f58677f6f97ef2d4ac5beab1181d3eb66f83f9ab5558c",
+        "/usr/local/libexec/sugarkube/ethernet_etcd_grpc.py": "aa96cbd77eeb0ab123bf4b1c0c666ea44c891098707974447a3800392e01a28a",
+        "/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py": "eaf2ebebd081fd37d66be3c3df1d4a5a305f65d7bfc472214fc54856166b930a",
+        "/usr/local/libexec/sugarkube/ethernet_wal_identity.py": "acba65c505fe6b9b60b3f5a8d6c05f9014c666bfc7ebcc64a08579207cc524d1"
+      },
+      "templates": {
+        "/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml": "# Managed by ethernet_quorum_recover.py\nresolv-conf: \"/run/sugarkube-ethernet-dns/kubelet-resolv.conf\"\n",
+        "/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf": "# Managed by ethernet_quorum_recover.py\n[Unit]\nRequires=sugarkube-ethernet-dns.service\nAfter=sugarkube-ethernet-dns.service\n[Service]\nBindReadOnlyPaths=/run/sugarkube-ethernet-dns/process-resolv.conf:/etc/resolv.conf\n",
+        "/etc/systemd/system/k3s.service.d/30-sugarkube-quorum-recovery.conf": "# Managed by ethernet_quorum_recover.py\n[Service]\nExecStartPre=/usr/bin/timeout 180s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py pre-start --enrollment /etc/rancher/k3s/sugarkube-recovery.json\nExecStartPost=-/usr/bin/timeout 60s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py post-start --enrollment /etc/rancher/k3s/sugarkube-recovery.json\n",
+        "/etc/systemd/system/sugarkube-ethernet-dns.service": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Enrolled Ethernet mDNS resolver for K3s\nAfter=network-online.target\nBefore=k3s.service\nStartLimitIntervalSec=300\nStartLimitBurst=3\n[Service]\nType=notify\nNotifyAccess=main\nUser=root\nUMask=0022\nRuntimeDirectory=sugarkube-ethernet-dns\nRuntimeDirectoryMode=0755\nExecStart=/usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet_mdns_resolver.py --enrollment /etc/rancher/k3s/sugarkube-dns.json\nTimeoutStartSec=15\nTimeoutStopSec=5\nRestart=on-failure\nRestartSec=10\n",
+        "/etc/systemd/system/sugarkube-ethernet-recovery.service": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Guarded Ethernet address recovery\nAfter=network-online.target\n[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=185\nExecStart=/usr/bin/timeout 180s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py watch --enrollment /etc/rancher/k3s/sugarkube-recovery.json\n",
+        "/etc/systemd/system/sugarkube-ethernet-recovery.timer": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Observe Ethernet address changes\n[Timer]\nOnBootSec=60s\nOnUnitInactiveSec=30s\nAccuracySec=5s\nUnit=sugarkube-ethernet-recovery.service\n[Install]\nWantedBy=timers.target\n"
+      }
+    },
+    "target": {
+      "runtime_sha256": {
+        "/usr/local/libexec/sugarkube/ethernet-etcd.desc": "4ff408bd7b84e57c41b0504831efe7c4d16eb9a27ecd06d970dd55a85f67ff9d",
+        "/usr/local/libexec/sugarkube/ethernet-quorum-recover.py": "6acb80dcd38ced32a57792fe8eb7dc5ee6ae05099ed51643813fbf4605752201",
+        "/usr/local/libexec/sugarkube/ethernet_etcd_grpc.py": "aa96cbd77eeb0ab123bf4b1c0c666ea44c891098707974447a3800392e01a28a",
+        "/usr/local/libexec/sugarkube/ethernet_mdns_resolver.py": "e51ae3e6eae1b15337acfa8955e582d0691511418897daa7dae19fe898151779",
+        "/usr/local/libexec/sugarkube/ethernet_wal_identity.py": "acba65c505fe6b9b60b3f5a8d6c05f9014c666bfc7ebcc64a08579207cc524d1"
+      },
+      "templates": {
+        "/etc/rancher/k3s/config.yaml.d/21-sugarkube-resolver.yaml": "# Managed by ethernet_quorum_recover.py\nresolv-conf: \"/run/sugarkube-ethernet-dns/kubelet-resolv.conf\"\n",
+        "/etc/systemd/system/k3s.service.d/25-sugarkube-resolver.conf": "# Managed by ethernet_quorum_recover.py\n[Unit]\nRequires=sugarkube-ethernet-dns.service\nAfter=sugarkube-ethernet-dns.service\n[Service]\nBindReadOnlyPaths=/run/systemd/resolve:/run/sugarkube-ethernet-dns/host-resolved:norbind\nBindReadOnlyPaths=/run/sugarkube-ethernet-dns/resolved:/run/systemd/resolve:norbind\n",
+        "/etc/systemd/system/k3s.service.d/30-sugarkube-quorum-recovery.conf": "# Managed by ethernet_quorum_recover.py\n[Service]\nExecStartPre=/usr/bin/timeout 180s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py pre-start --enrollment /etc/rancher/k3s/sugarkube-recovery.json\nExecStartPost=-/usr/bin/timeout 60s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py post-start --enrollment /etc/rancher/k3s/sugarkube-recovery.json\n",
+        "/etc/systemd/system/sugarkube-ethernet-dns.service": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Enrolled Ethernet mDNS resolver for K3s\nAfter=network-online.target\nBefore=k3s.service\nStartLimitIntervalSec=300\nStartLimitBurst=3\n[Service]\nType=notify\nNotifyAccess=main\nUser=root\nUMask=0022\nRuntimeDirectory=sugarkube-ethernet-dns\nRuntimeDirectoryMode=0755\nRuntimeDirectoryPreserve=yes\nExecStart=/usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet_mdns_resolver.py --enrollment /etc/rancher/k3s/sugarkube-dns.json\nTimeoutStartSec=15\nTimeoutStopSec=5\nRestart=on-failure\nRestartSec=10\n",
+        "/etc/systemd/system/sugarkube-ethernet-recovery.service": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Guarded Ethernet address recovery\nAfter=network-online.target\n[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=185\nExecStart=/usr/bin/timeout 180s /usr/bin/python3 -I /usr/local/libexec/sugarkube/ethernet-quorum-recover.py watch --enrollment /etc/rancher/k3s/sugarkube-recovery.json\n",
+        "/etc/systemd/system/sugarkube-ethernet-recovery.timer": "# Managed by ethernet_quorum_recover.py\n[Unit]\nDescription=Observe Ethernet address changes\n[Timer]\nOnBootSec=60s\nOnUnitInactiveSec=30s\nAccuracySec=5s\nUnit=sugarkube-ethernet-recovery.service\n[Install]\nWantedBy=timers.target\n"
+      }
+    }
+  },
+  "revisions": {
+    "source": "1a9e767257e65470d6c7e732240b592500b6ac46",
+    "target": "b320c583a39d9771548bff9cd684bf3c08b82caf"
+  }
+}

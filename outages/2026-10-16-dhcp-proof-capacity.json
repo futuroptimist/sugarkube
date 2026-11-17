@@ -1,0 +1,10 @@
+{
+  "id": "dhcp-proof-capacity-2026-10-16",
+  "date": "2026-10-16",
+  "component": "Disposable all-member DHCP implementation proof",
+  "rootCause": "Two native K3s fixture attempts exhausted safe free-space headroom on the 32 GB execution filesystem. The first also used an incorrect kubectl invocation for the extracted fixture binary. The second joining server logged an unresolved numeric-address TLS verification failure. Neither attempt reached three-server enrollment.",
+  "resolution": "Stopped all new fixtures and preserved databases and evidence. Corrected the fixture kubectl command; losslessly compressed unused binaries with verified round-trip hashes, but storage pressure recurred. Full implementation integration remains blocked pending adequate isolated test capacity and diagnosis of the join TLS failure. No privilege expansion, reset or live-cluster action was used.",
+  "references": [
+    "docs/ethernet-dhcp-recovery.md"
+  ]
+}
