@@ -431,15 +431,29 @@ image `main-018687f`, and chart `3.1.1`) also predates `build-info-v1` and is ex
 for the same strict legacy contract. This is not a general fallback: every coordinate must match,
 and unrecognized or future releases remain subject to the modern identity contract.
 
-Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
-runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
-are required or accepted:
+Use the [containerized DSPACE smoke runner](https://github.com/democratizedspace/dspace/blob/main/docs/qa/container-chat-smoke.md),
+merged in DSPACE #4882 and updated by #4889 to Node **24.22.3**. The adapter requires an existing
+host Node 24.22.3 or newer Node 24 patch and a Linux Docker daemon with native amd64 or arm64
+execution. Do not install host browser/npm dependencies during release verification; stop if the
+runner environment is unavailable. Build and offline-check the dedicated image from clean reviewed
+runner source as documented upstream, separately from any live release operation.
+
+The image and adapter checkout must have the same full reviewed runner SHA. The adapter resolves
+the local image to an immutable image ID without pulling. Record both runner coordinates separately
+from the candidate application SHA/image/chart digests. The image pins Playwright 1.54.2 and Node
+24.22.3; CI test discovery, offline Chromium launch and its negative control are tooling evidence,
+not staging journeys, live inference or proof of the deployed application's runtime.
+
+For the modern v3.1.0 contract, configure the environment of the guarded verifier explicitly:
 
 ```bash
-DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+export DSPACE_SMOKE_RUNNER=/reviewed/dspace/scripts/run-container-chat-smoke.mjs
+export DSPACE_SMOKE_IMAGE='dspace-chat-smoke:<reviewed-full-runner-SHA>'
+export DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=chat-default-provider-v1
+export DSPACE_SMOKE_TIMEOUT_MS=240000
 STAGING_KUBECONFIG="$HOME/.kube/config-sugarkube-staging"
 PROD_KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
-chmod +x "$DSPACE_SMOKE_RUNNER"
+test -x "$DSPACE_SMOKE_RUNNER"
 
 just dspace-release-verify \
   env=staging \
@@ -456,6 +470,20 @@ just dspace-release-verify \
 
 Add `config=<nondefault-environment-config>` when verification must use a
 nondefault app config.
+
+The provider-config environment value is necessary because the current modern verifier argv
+omits `--provider-config-contract`. Historical/hotfix contracts must retain their exact explicit
+flags; do not reinterpret them as modern. The adapter's 240-second budget plus 10-second cleanup
+allowance fits the verifier's 300-second timeout. Never weaken completion or identity checks to
+compensate for a missing browser, timeout or absent runtime.
+
+For standalone completion JSON, use `--runner-revision` for the reviewed runner SHA, not the target
+application SHA, and an unshared fresh result path in an existing directory. The adapter clears
+existing results before preflight and accepts only fresh matching completion proof; exit zero
+without proof is failure. Keep that result, runner image ID/revision and exit status beside target
+evidence. Guarded Sugarkube finalization instead records bounded `runtimeVerification`; the JSON
+alone does not create finalized evidence or authorize promotion. Intercepted transport sends no
+live provider requests, so live relay E2EE, metrics, monitoring and soak checks remain required.
 
 Deploy staging from its approved candidate; finalized evidence is created only after post-rollout
 verification succeeds:
