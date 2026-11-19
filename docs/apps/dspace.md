@@ -351,7 +351,7 @@ mismatch.
 
 ### 4. Guarded production mutation and verification
 
-Only after the approved window and read-only review, invoke the guarded promotion recipeâ€”not raw
+Only after the approved window and read-only review, invoke the guarded promotion recipe—not raw
 `helm upgrade`, `helm rollback`, or `kubectl apply`:
 
 ```bash
@@ -704,9 +704,13 @@ GitHub application release event produces the semantic image alias and combined 
 only after the immutable image and chart prerequisites exist. A Git tag push alone does not
 publish that semantic image alias.
 
-After verifying the published chart, update the selected local Sugarkube pin for review:
+After verifying the published chart, copy its exact version from the reviewed successful
+publication evidence into `CHART_VERSION`, replacing the placeholder below. Do not reuse the
+historical recovery shell's variable or the currently pinned staging/production versions; those
+may select a different chart. Then update the selected local Sugarkube pin for review:
 
 ```bash
+CHART_VERSION='REPLACE_WITH_REVIEWED_PUBLISHED_CHART_VERSION'
 just app-chart-bump app=dspace version="$CHART_VERSION" env=staging
 ```
 
