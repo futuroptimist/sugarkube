@@ -107,7 +107,8 @@ def valid_completion_time(value):
     if not matches(value, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"):
         return False
     try:
-        dt.datetime.fromisoformat(value)
+        # Python before 3.11 needs an explicit UTC offset instead of Z.
+        dt.datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError:
         return False
     return True

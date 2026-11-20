@@ -277,6 +277,22 @@ def test_production_promotion_gate_cannot_accept_preflight(tmp_path):
         legacy.staging_gate(prod, fixture.run())
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2024-02-29T09:00:00.123Z", True),
+        ("2026-02-29T09:00:00.123Z", False),
+        ("2024-02-29T24:00:00.123Z", False),
+        ("2024-02-29T09:00:00.123+00:00", False),
+        ("2024-02-29T09:00:00.123z", False),
+        ("2024-02-29T09:00:00Z", False),
+        ("2024-02-29T09:00:00.123456Z", False),
+    ],
+)
+def test_completion_time_requires_a_real_utc_millisecond_timestamp(value, expected):
+    assert adapter.valid_completion_time(value) is expected
+
+
 @pytest.mark.parametrize("context", [b"sugar-prod\n", b"other\n", b""])
 def test_context_rejection_before_registry(tmp_path, context):
     fixture = Fixture(tmp_path)
