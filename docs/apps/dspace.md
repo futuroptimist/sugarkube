@@ -1,6 +1,59 @@
 # democratized.space (dspace) on Sugarkube
 
-## 3.1.1 staging-first promotion preparation (no operation authorized)
+## Current v3.1.0 release entry point
+
+Use this page's [chart publication procedure](#confirmpublish-oci-chart),
+[guarded staging deployment](#deploy-staging), [production promotion](#promote-production) and
+[rollback](#rollback) examples, with the
+[v3.1 QA checklist](https://github.com/democratizedspace/dspace/blob/main/docs/qa/v3.1.md)
+for acceptance criteria. The generic `just app-*` recipes below are implemented and preferred;
+`dspace-oci-*` recipes are compatibility shims with the same guarded requirements.
+The [upstream release runbook](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md)
+is being reconciled by [DSPACE #4880](https://github.com/democratizedspace/dspace/pull/4880).
+Until that companion lands, its `main` version still contains obsolete tag-only deployment and
+rollback commands. Use the guarded examples here instead; the companion link is review context,
+not a prerequisite merge or authorization to operate.
+
+DSPACE source metadata names application `3.1.0` and chart `3.1.3`. Chart `3.1.3` is already
+published at the source and OCI digest recorded in the [hotfix provenance section](#exact-v302-hotfix-identity-contract).
+It is an occupied immutable coordinate, not an available provisional publication slot.
+Reconcile that existing artifact with the approved candidate and manifest contract, or obtain
+separate approval for an unused chart version. In particular, an older chart source cannot satisfy
+the ordinary same-source full-release contract for a newer application commit. Never republish
+`3.1.3` or silently select a replacement. Source metadata is not proof of the deployed release;
+candidate selection and live sign-offs remain separate.
+The existing semantic `v3.1.0` image coordinate is occupied; follow the upstream
+[source/artifact reconciliation](https://github.com/democratizedspace/dspace/blob/main/docs/releases.md#application-versions-and-chart-versions)
+and stop pending a release-owner decision. Do not overwrite artifacts, fabricate a release
+manifest, reuse historical evidence as a new approval, or weaken publication guards.
+
+The current candidate requires fresh-user default provider `token-place`, model
+`qwen3-8b-instruct`, staging origin `https://staging.token.place` and production origin
+`https://token.place`. The committed production overlay still selects the historical Llama model,
+and the existing chart/image pins describe earlier targets. A separately reviewed configuration
+change must reconcile those inputs before v3.1.0 promotion; this documentation does not change them.
+
+| Environment | Default operator host | Grafana                                                                                                               |
+| ----------- | --------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Staging     | `sugarkube3`          | [Staging observability](http://sugarkube3:30300/d/sugarkube-staging-observability/sugarkube-staging-observability)    |
+| Production  | `sugarkube0`          | [Production observability](http://sugarkube0:30300/d/sugarkube-prod-observability/sugarkube-production-observability) |
+
+Run Bash examples from a reviewed Sugarkube checkout with explicit environment kubeconfigs.
+Hostnames do not prove cluster identity; production promotion also requires staging read access.
+Dashboard links alone do not prove reachability, complete panels or a successful soak. Follow
+[observability operations](../observability-operations.md),
+[DSPACE release integrity](../observability-dspace-release-integrity.md) and
+[encrypted completion observability](../encrypted-completion-observability.md), and retain the
+required live evidence before production approval. Intercepted browser checks do not establish
+live token.place completion or satisfy the entire QA checklist.
+
+The following incident sections preserve earlier coordinates and constraints. They do not select
+the current candidate or authorize repeating their operations. Continue at [Artifact model](#artifact-model)
+for the general procedure.
+
+<a id="311-staging-first-promotion-preparation-no-operation-authorized"></a>
+
+## Historical 3.1.1 staging-first promotion preparation (no operation authorized)
 
 `docs/apps/dspace.promotion-target.json` is the reviewed, schema-v2 machine-readable preparation target for application `3.1.1` and chart `3.1.2`. It records the immutable image and chart release coordinates: explicit application and chart source revisions, the branch image tag, OCI image and chart manifest digests, and semantic release tag. A semantic image tag is never a deployment coordinate. The staging chart pin advances so a later approved staging candidate can exercise chart `3.1.2`; production pins and finalized baselines remain unchanged.
 
@@ -48,9 +101,11 @@ This preparation is not approval or deployment evidence. A future operator must,
 
 The existing `dspace-prod-metrics-pull-policy-recover` operation remains ineligible for this incident: application 3.0.1 cannot supply the required metrics. Preserve its preflight and verifier unchanged; do not rerun, weaken, bypass, or repurpose it as an application promotion. Do not roll back or uninstall Helm, and do not read, rotate, or delete the metrics Secret. Issues #2325 and #2329 remain closed unless a human chooses otherwise, and issue #2408 is separate and must not be modified or conflated.
 
-This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
+The historical preparation above remains scoped to its recorded 3.1.1/OpenAI target; it is not the v3.1.0/token.place release contract.
 
-## Production authenticated metrics chart maintenance
+<a id="production-authenticated-metrics-chart-maintenance"></a>
+
+## Historical production authenticated metrics chart maintenance
 
 This guarded operation is a **chart-only maintenance upgrade** from immutable DSPACE chart 3.0.2
 to 3.0.3 so authenticated production metrics can be enabled. It is not an application promotion:
@@ -128,7 +183,9 @@ Any failure after reservation preserves failed evidence. Review that evidence an
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
 
-## Production Helm reconciliation for application 3.0.1
+<a id="production-helm-reconciliation-for-application-301"></a>
+
+## Historical production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by
 Sugarkube issue #2325. Keep the production Helm freeze in place throughout. The reviewed,
@@ -386,15 +443,43 @@ image `main-018687f`, and chart `3.1.1`) also predates `build-info-v1` and is ex
 for the same strict legacy contract. This is not a general fallback: every coordinate must match,
 and unrecognized or future releases remain subject to the modern identity contract.
 
-Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
-runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
-are required or accepted:
+Use the [containerized DSPACE smoke runner](https://github.com/democratizedspace/dspace/blob/main/docs/qa/container-chat-smoke.md),
+merged in DSPACE #4882 and updated by #4889 to Node **24.22.3**. The adapter requires an existing
+host Node 24.22.3 or newer Node 24 patch and a Linux Docker daemon with native amd64 or arm64
+execution. Do not install host browser/npm dependencies during release verification; stop if the
+runner environment is unavailable. Build and offline-check the dedicated image from clean reviewed
+runner source as documented upstream, separately from any live release operation.
+
+The image and adapter checkout must have the same full reviewed runner SHA. The adapter resolves
+the local image to an immutable image ID without pulling. Record both runner coordinates separately
+from the candidate application SHA/image/chart digests. The image pins Playwright 1.54.2 and Node
+24.22.3; CI test discovery, offline Chromium launch and its negative control are tooling evidence,
+not staging journeys, live inference or proof of the deployed application's runtime.
+
+Before invoking the guarded verifier, compare the image label against the reviewed clean adapter
+checkout and retain the printed image ID/revision alongside release evidence. The verifier captures
+adapter stdout and does not supply `--runner-revision`, so neither that output nor a mutable local
+tag proves the approved runner pairing. Pass the inspected immutable ID in `DSPACE_SMOKE_IMAGE`.
+These checks inspect an already built local image; they do not install, build or pull anything:
 
 ```bash
-DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+set -euo pipefail
+RUNNER_REVISION='REPLACE_WITH_REVIEWED_FULL_RUNNER_SHA'
+RUNNER_CHECKOUT=/reviewed/dspace
+[[ "$RUNNER_REVISION" =~ ^[0-9a-f]{40}$ ]]
+test -z "$(git -C "$RUNNER_CHECKOUT" status --porcelain)"
+test "$(git -C "$RUNNER_CHECKOUT" rev-parse HEAD)" = "$RUNNER_REVISION"
+RUNNER_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "dspace-chat-smoke:$RUNNER_REVISION")
+[[ "$RUNNER_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$RUNNER_IMAGE_ID")" = "$RUNNER_REVISION"
+printf 'runnerRevision=%s\nrunnerImageID=%s\n' "$RUNNER_REVISION" "$RUNNER_IMAGE_ID"
+export DSPACE_SMOKE_IMAGE="$RUNNER_IMAGE_ID"
+export DSPACE_SMOKE_RUNNER="$RUNNER_CHECKOUT/scripts/run-container-chat-smoke.mjs"
+test -x "$DSPACE_SMOKE_RUNNER"
+export DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=chat-default-provider-v1
+export DSPACE_SMOKE_TIMEOUT_MS=240000
 STAGING_KUBECONFIG="$HOME/.kube/config-sugarkube-staging"
 PROD_KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
-chmod +x "$DSPACE_SMOKE_RUNNER"
 
 just dspace-release-verify \
   env=staging \
@@ -411,6 +496,23 @@ just dspace-release-verify \
 
 Add `config=<nondefault-environment-config>` when verification must use a
 nondefault app config.
+
+The provider-config environment value is necessary because the current modern verifier argv
+omits `--provider-config-contract`. The exact legacy 3.0.1 and original 3.1.0 tuples also omit it:
+use a command-scoped `DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=legacy-no-default-provider-v1`
+for their verification or rollback, as shown below. Do not choose by application version alone.
+The exact recognized 3.1.1 and hotfix tuples retain their explicit verifier-supplied flags, which
+take precedence over the environment; do not reinterpret them as modern. The adapter's 240-second budget plus 10-second cleanup
+allowance fits the verifier's 300-second timeout. Never weaken completion or identity checks to
+compensate for a missing browser, timeout or absent runtime.
+
+For standalone completion JSON, use `--runner-revision` for the reviewed runner SHA, not the target
+application SHA, and an unshared fresh result path in an existing directory. The adapter clears
+existing results before preflight and accepts only fresh matching completion proof; exit zero
+without proof is failure. Keep that result, runner image ID/revision and exit status beside target
+evidence. Guarded Sugarkube finalization instead records bounded `runtimeVerification`; the JSON
+alone does not create finalized evidence or authorize promotion. Intercepted transport sends no
+live provider requests, so live relay E2EE, metrics, monitoring and soak checks remain required.
 
 Deploy staging from its approved candidate; finalized evidence is created only after post-rollout
 verification succeeds:
@@ -528,16 +630,16 @@ tuple grants rollout authority or replaces successful staging verification befor
 - Sugarkube responsibilities: select `dev`, `staging`, or `prod`; load `docs/examples/apps/dspace.env` or a local override; select kubeconfig/context; install or upgrade Helm; verify rollout status, logs, and public paths.
 - Cloudflare responsibilities: DNS and Tunnel routes to Traefik are outside Helm and must exist before public verification.
 
-| Coordinate | Value |
-| --- | --- |
-| Image | `ghcr.io/democratizedspace/dspace` |
-| Chart | `oci://ghcr.io/democratizedspace/charts/dspace` |
-| Release | `dspace` |
-| Namespace | `dspace` |
-| App config | `docs/examples/apps/dspace.env` |
-| Chart version pins | Shared/default `docs/apps/dspace.version`; live staging `docs/apps/dspace.staging.version` (`3.1.2` for application `3.1.1`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
-| Production tag pin | `docs/apps/dspace.prod.tag` |
-| Verify paths | `/config.json`, `/healthz`, `/livez` |
+| Coordinate         | Value                                                                                                                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Image              | `ghcr.io/democratizedspace/dspace`                                                                                                                                                                                                        |
+| Chart              | `oci://ghcr.io/democratizedspace/charts/dspace`                                                                                                                                                                                           |
+| Release            | `dspace`                                                                                                                                                                                                                                  |
+| Namespace          | `dspace`                                                                                                                                                                                                                                  |
+| App config         | `docs/examples/apps/dspace.env`                                                                                                                                                                                                           |
+| Chart version pins | Shared/default `docs/apps/dspace.version`; historical staging target `docs/apps/dspace.staging.version` (`3.1.2` for application `3.1.1`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
+| Production tag pin | `docs/apps/dspace.prod.tag`                                                                                                                                                                                                               |
+| Verify paths       | `/config.json`, `/healthz`, `/livez`                                                                                                                                                                                                      |
 
 ### Approved chart 3.0.3 publication provenance
 
@@ -555,27 +657,27 @@ publication provenance only and is intentionally not added to the release-manife
 
 Use these links before changing a deployment so the workflow runs, package versions, and source paths all agree.
 
-| Artifact | Link |
-| --- | --- |
-| App repository | [DSPACE app repository](https://github.com/democratizedspace/dspace) |
-| Image workflow | [Recent image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml) |
-| Successful main image runs | [Successful main image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
-| Successful v3 image runs | [Successful v3 image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess) |
-| GHCR image package | [GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace) |
-| Chart workflow | [Recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) |
-| GHCR chart package | No public package page is associated yet; use the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) and `helm show chart` below until the chart package appears. |
-| Dockerfile | [Application Dockerfile](https://github.com/democratizedspace/dspace/blob/main/Dockerfile) |
-| Chart source | [Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) |
-| App release guide | [Sugarkube release guide in the app repo](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md) |
+| Artifact                   | Link                                                                                                                                                                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App repository             | [DSPACE app repository](https://github.com/democratizedspace/dspace)                                                                                                                                                                |
+| Image workflow             | [Recent image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml)                                                                                                                            |
+| Successful main image runs | [Successful main image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess)                                                                                  |
+| Successful v3 image runs   | [Successful v3 image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess)                                                                                      |
+| GHCR image package         | [GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace)                                                                                                                                    |
+| Chart workflow             | [Recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml)                                                                                                                             |
+| GHCR chart package         | No public package page is associated yet; use the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) and `helm show chart` below until the chart package appears. |
+| Dockerfile                 | [Application Dockerfile](https://github.com/democratizedspace/dspace/blob/main/Dockerfile)                                                                                                                                          |
+| Chart source               | [Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace)                                                                                                                                            |
+| App release guide          | [Sugarkube release guide in the app repo](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md)                                                                                                      |
 
 ## Environment topology
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
   The dev overlay intentionally does not choose a token.place origin; developers who need local runtime routing can copy `docs/examples/apps/dspace.env` to a local app config and add chart-supported `env` entries to their private values file.
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
-  The configured repository pin selects the live DSPACE application `3.1.1` release at chart `3.1.2` and Helm revision 30. The staging values inject `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct` and persist the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The release uses immutable image `main-22f506e` from source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json`. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
+  The historical repository pin and August 17 evidence record describe DSPACE application `3.1.1` release at chart `3.1.2` and Helm revision 30. The staging values inject `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct` and persist the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. That recorded release used immutable image `main-22f506e` from source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json`. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. The approved production target is recovery chart `3.0.3` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the currently installed chart remains `3.0.2` until a separately authorized rollout. The production values enable authenticated metrics and the ServiceMonitor contract.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. The historical approved production target is recovery chart `3.0.3` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the earlier baseline recorded chart `3.0.2`. Neither a source pin nor that historical baseline establishes current live state. The production values enable authenticated metrics and the ServiceMonitor contract.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
@@ -597,7 +699,7 @@ APP_TAG=main-REPLACE_SHORTSHA
 gh run list --repo democratizedspace/dspace --workflow ci-image.yml --branch main --status success --limit 5
 ```
 
-If no suitable image exists, publish it from the app repo workflow, then return here with the immutable tag it produced.
+If no suitable image exists, obtain separate publication authorization before running the app image workflow, then return here with evidence of a fully successful run and its immutable tag. Do not rerun a failed image publication that already occupied its branch-SHA coordinate; fix through a new reviewed source commit.
 
 ```bash
 gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
@@ -620,28 +722,52 @@ PROD_CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$PROD_CHART_PIN" 
 helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$PROD_CHART_VERSION"
 ```
 
-If the chart changed, bump the chart version in the DSPACE app repo and publish it there with [the chart workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
+If the chart changed, prepare an unused chart version in DSPACE, review it, and obtain separate
+publication authorization. The [chart workflow source](https://github.com/democratizedspace/dspace/blob/main/.github/workflows/ci-helm.yml)
+accepts only a push of exactly `chart-v<Chart.yaml version>` at the reviewed immutable source
+commit. It has no manual dispatch trigger. Branch pushes and `gh workflow run ci-helm.yml` do not
+publish charts. Existing coordinates cannot be replaced; chart `3.0.1` is tombstoned. Preserve
+both authoritative-absence checks and the successful run's source SHA, package hash and OCI digest.
+The application Git tag `v<applicationVersion>` is separate from the chart tag; the published
+GitHub application release event produces the semantic image alias and combined release manifest
+only after the immutable image and chart prerequisites exist. A Git tag push alone does not
+publish that semantic image alias.
+
+After verifying the published chart, copy its exact version from the reviewed successful
+publication evidence into `CHART_VERSION`, replacing the placeholder below. Do not reuse the
+historical recovery shell's variable or the currently pinned staging/production versions; those
+may select a different chart. Then update the selected local Sugarkube pin for review:
 
 ```bash
-gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
+CHART_VERSION='REPLACE_WITH_REVIEWED_PUBLISHED_CHART_VERSION'
+just app-chart-bump app=dspace version="$CHART_VERSION" env=staging
 ```
+
+`app-chart-bump` checks the existing OCI chart with `helm show chart` and writes the resolved local
+version file. It neither publishes the chart nor deploys it. Review and commit the pin separately;
+production pin changes require production approval after staging sign-off. The guarded deployment
+uses the approved manifest's immutable chart digest, not a fresh mutable tag resolution.
 
 ## Deploy staging
 
 ### Release-manifest approval and evidence flow
 
-Download the `dspace-release-manifest` artifact from the successful upstream
-image workflow and extract `dspace-release-manifest/dspace-release-manifest.json`.
+After the upstream publication prerequisites and release-owner decisions are satisfied,
+download the `dspace-release-manifest` artifact from the successful upstream semantic-release
+job in the image workflow and extract `dspace-release-manifest/dspace-release-manifest.json`.
 Do not copy coordinates from mutable package tags. Create a canonical staging
 candidate with an explicit UTC approval time, approver identity, and one of the
-configuration contract's exact provider values (`token-place` or `openai`):
+configuration contract's exact provider values (`token-place` or `openai`). For the current
+v3.1.0 candidate use `token-place`. Set `STAGING_APPROVED_AT` and `STAGING_APPROVED_BY` from
+the actual staging approval record; use separate `PROD_APPROVED_AT` and `PROD_APPROVED_BY`
+values from the later production approval. Never copy an example timestamp as approval:
 
 ```bash
 python3 scripts/dspace_release_manifest.py candidate \
   --upstream dspace-release-manifest/dspace-release-manifest.json \
   --output deployment-candidates/dspace/staging.json \
   --environment staging --provider token-place \
-  --approved-at 2026-07-26T12:00:00Z --approved-by '<operator-or-review-record>'
+  --approved-at "$STAGING_APPROVED_AT" --approved-by "$STAGING_APPROVED_BY"
 python3 scripts/dspace_release_manifest.py validate \
   --manifest deployment-candidates/dspace/staging.json
 ```
@@ -703,7 +829,7 @@ python3 scripts/dspace_release_manifest.py candidate \
   --upstream dspace-release-manifest/dspace-release-manifest.json \
   --output deployment-candidates/dspace/prod.json \
   --environment prod --provider token-place \
-  --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
+  --approved-at "$PROD_APPROVED_AT" --approved-by "$PROD_APPROVED_BY"
 TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
@@ -749,7 +875,7 @@ abandoned, explicitly remove that exact sidecar (for example,
 `rm -- deployment-evidence/dspace/staging/<file>.json.reservation`) and rerun the
 guarded command. Never remove a reservation merely because it is old.
 
-This repository change only persists the staging configuration; it does not deploy anything to a cluster. After it is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
+Only after separate operator approval, deploy the approved immutable, environment-neutral DSPACE image with runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
 
 Preferred generic command:
 
@@ -788,7 +914,8 @@ The runtime config check is a required routing gate, not an optional fallback: i
 ```bash
 curl -fsS https://staging.democratized.space/config.json \
   | jq -e '
-      .tokenPlace.url == "https://staging.token.place"
+      .chat.defaultProvider == "token-place"
+      and .tokenPlace.url == "https://staging.token.place"
       and .tokenPlace.model == "qwen3-8b-instruct"
     '
 ```
@@ -801,12 +928,11 @@ curl -fsS https://staging.democratized.space/healthz
 curl -fsS https://staging.democratized.space/livez
 ```
 
-
 ## Cross-app token.place browser API release sequence
 
 When a DSPACE release depends on browser calls to token.place API v1, keep the producer and consumer rollout ordered so Sugarkube verifies token.place behavior but never becomes the source of CORS response headers:
 
-1. Deploy the token.place image containing wildcard API v1 CORS.
+1. Under separate producer rollout authorization, verify or deploy the approved token.place image supporting API v1 relay E2EE and its browser CORS contract.
 2. Run token.place public HTTP verification:
 
    ```bash
@@ -823,11 +949,18 @@ When a DSPACE release depends on browser calls to token.place API v1, keep the p
 5. Confirm DSPACE `/config.json` exposes the expected token.place runtime URL for the target environment.
 6. Open `/chat`, send a message, and inspect Browser Network.
 
-For staging, the browser smoke must show DSPACE calling `https://staging.token.place/api/v1/chat/completions`; for production it must show `https://token.place/api/v1/chat/completions`. Confirm the `OPTIONS` preflight succeeds, the `POST` succeeds or returns a readable API-owned error, no `Authorization` header is sent, no token.place credentials are sent, fetch `credentials` are omitted, and the request does not set `stream: true`.
+For the v3.1.0 default direct relay path, Browser Network must show, in order, `GET /api/v1/relay/servers/next`, `POST /api/v1/relay/requests`, and `POST /api/v1/relay/responses/retrieve` against `https://staging.token.place` in staging or
+`https://token.place` in production. Confirm successful preflight and readable API-owned errors,
+no `Authorization` header, no token.place credentials, and omitted fetch credentials. The request
+payload contains ciphertext and safe routing metadata, never plaintext prompts, model, messages,
+player state or secrets; `stream` is absent or false inside the encrypted request. Follow the
+[v3.1 QA contract](https://github.com/democratizedspace/dspace/blob/main/docs/qa/v3.1.md)
+for the separately gated optional proxy path and live evidence. The earlier plaintext browser
+`/api/v1/chat/completions` example is superseded and must not be used for current release QA.
 
 ## Promote production
 
-This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.3` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
+Promote only after staging QA, monitoring and soak sign-off, with separate operator approval. Prefer the generic command; it uses the reviewed prod values chain and environment chart pin. The existing chart `3.0.3` and `main-1a31a56` fallback are historical maintenance coordinates, not the current candidate. Pass the explicit approved immutable tag and manifest; first reconcile the pins and production model noted at the top of this page.
 
 ```bash
 TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
@@ -872,8 +1005,9 @@ The runtime config check is a required production routing gate before opening `/
 ```bash
 curl -fsS https://democratized.space/config.json \
   | jq -e '
-      .tokenPlace.url == "https://token.place"
-      and .tokenPlace.model == "llama-3.1-8b-instruct"
+      .chat.defaultProvider == "token-place"
+      and .tokenPlace.url == "https://token.place"
+      and .tokenPlace.model == "qwen3-8b-instruct"
     '
 ```
 
@@ -891,14 +1025,18 @@ Use the DSPACE-only manifest rollback command with a **previously finalized**
 release-evidence record. The historical record supplies the chart digest,
 chart version, immutable branch-SHA image tag, image digest, full source SHA,
 application version, and approved provider. There are deliberately no separate
-tag or chart-version arguments.
+tag or chart-version arguments. Select the provider-config contract from the complete target
+before choosing an invocation. The first two examples apply only to modern targets; for the exact
+legacy tuples, use the [scoped legacy alternative](#legacy-rollback-provider-contract) instead.
 
 ```bash
+DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=chat-default-provider-v1 \
 just dspace-manifest-rollback \
   env=staging \
   manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
-  smoke_runner=/opt/dspace/bin/chat-smoke \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$STAGING_KUBECONFIG" \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier
 ```
 
@@ -908,14 +1046,44 @@ is rejected:
 
 ```bash
 TARGET_SHA=REPLACE_WITH_THE_40_CHARACTER_TARGET_SOURCE_SHA
+DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=chat-default-provider-v1 \
 just dspace-manifest-rollback \
   env=prod \
   manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
-  smoke_runner=/opt/dspace/bin/chat-smoke \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
   confirm="dspace:prod:${TARGET_SHA}"
 ```
+
+### Legacy rollback provider contract
+
+Select the smoke provider-config contract **before** any Helm mutation. The modern export in the
+runner setup applies to current candidates, but the exact allowlisted legacy 3.0.1 production and
+original 3.1.0 staging tuples require `legacy-no-default-provider-v1`. The verifier omits the flag
+for those tuples, so inheriting the modern export can fail post-mutation verification. Verify the
+complete target tuple against [mandatory release verification](#mandatory-release-verification),
+including environment and finalized evidence, rather than guessing from a version string.
+
+For a separately approved rollback to the exact legacy production tuple, use this alternative
+invocation with the same reviewed immutable runner preflight and genuine finalized target:
+
+```bash
+LEGACY_PROD_MANIFEST=/reviewed/previous-finalized-legacy-production.json
+FRESH_ROLLBACK_EVIDENCE=/private/evidence/new-legacy-production-rollback.json
+TARGET_SHA=$(jq -er '.sourceRevision' "$LEGACY_PROD_MANIFEST")
+DSPACE_EXPECTED_PROVIDER_CONFIG_CONTRACT=legacy-no-default-provider-v1 \
+just dspace-manifest-rollback env=prod manifest="$LEGACY_PROD_MANIFEST" \
+  evidence="$FRESH_ROLLBACK_EVIDENCE" smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" confirm="dspace:prod:${TARGET_SHA}"
+```
+
+For the exact original legacy staging tuple, use the same command-scoped override with
+`env=staging`, its kubeconfig and finalized staging target. Do not execute both a modern and legacy
+rollback as a sequence, or retry automatically after mutation. The scoped override leaves the
+modern default intact for subsequent current-candidate work. Recognized 3.1.1/hotfix tuples keep
+their explicit verifier-supplied flags; no compatibility profile or finalized evidence is weakened.
 
 Before reserving evidence or changing Helm/Kubernetes state, the command checks
 cluster identity, validates the strict final manifest and fresh OCI provenance,
