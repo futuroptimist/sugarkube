@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import runpy
 import sys
 from pathlib import Path
 
@@ -433,3 +435,94 @@ def test_bounded_command_output_and_sanitized_stderr():
             ],
             32,
         )
+
+
+def test_bounded_command_reads_exact_success_output():
+    assert adapter.command([sys.executable, "-c", "print('read-only')"], 10) == b"read-only\n"
+
+
+def test_bounded_command_missing_executable_is_sanitized(tmp_path):
+    with pytest.raises(adapter.PreflightError) as error:
+        adapter.command([str(tmp_path / "private-executable")], 32)
+    assert str(error.value) == "read-only command failed or timed out"
+
+
+def cli_args(home):
+    return [
+        "preflight",
+        "--environment",
+        "staging",
+        "--receipt",
+        str(home / "receipt.json"),
+        "--approval",
+        str(home / "approval.json"),
+        "--native-summary",
+        str(home / "summary.json"),
+    ]
+
+
+def test_cli_success_emits_only_non_authorizing_evidence(tmp_path, monkeypatch, capsys):
+    fixture = Fixture(tmp_path)
+    argv = cli_args(tmp_path)
+    for path, value in zip(argv[4::2], (fixture.receipt, fixture.approval, fixture.native)):
+        Path(path).write_bytes(encode(value))
+    preflight = adapter.preflight
+
+    def offline_preflight(receipt, approval, native_raw, *, home):
+        assert home == tmp_path
+        return preflight(receipt, approval, native_raw, home=home, read=fixture.read)
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(adapter, "preflight", offline_preflight)
+    assert adapter.main(argv) == 0
+    captured = capsys.readouterr()
+    evidence = json.loads(captured.out)
+    assert evidence["schema"] == "sugarkube-dspace-staging-preflight-v1"
+    assert evidence["sourceRevision"] == SOURCE
+    assert evidence["deploymentAuthorized"] is False
+    assert captured.err == ""
+    assert {argv[0] for argv in fixture.calls} == {"kubectl", sys.executable, "oras"}
+
+
+@pytest.mark.parametrize(
+    ("fault", "diagnostic"),
+    [
+        ("malformed", "invalid JSON metadata"),
+        ("too-large", "input file exceeds the size limit"),
+        ("non-regular", "expected a regular input file"),
+        ("symlink", "unreadable or invalid input."),
+        ("missing", "unreadable or invalid input."),
+    ],
+)
+def test_cli_rejection_emits_no_evidence(tmp_path, monkeypatch, capsys, fault, diagnostic):
+    def unexpected_preflight(*_args, **_kwargs):
+        pytest.fail("rejected input must not reach preflight")
+
+    monkeypatch.setattr(adapter, "preflight", unexpected_preflight)
+    argv = cli_args(tmp_path)
+    receipt = Path(argv[4])
+    if fault == "malformed":
+        receipt.write_bytes(b'{"private-input":')
+    elif fault == "too-large":
+        receipt.write_bytes(b"x" * (adapter.MAX_INPUT + 1))
+    elif fault == "non-regular":
+        os.mkfifo(receipt)
+    elif fault == "symlink":
+        target = tmp_path / "private-input"
+        target.write_bytes(b"{}")
+        receipt.symlink_to(target)
+
+    assert adapter.main(argv) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"Staging coordinate preflight rejected: {diagnostic}\n"
+
+
+def test_script_entrypoint_propagates_argument_parser_exit(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [adapter.__file__, "--help"])
+    with pytest.raises(SystemExit) as exit_status:
+        runpy.run_path(adapter.__file__, run_name="__main__")
+    assert exit_status.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage:" in captured.out
+    assert captured.err == ""
