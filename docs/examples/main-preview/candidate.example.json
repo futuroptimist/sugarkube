@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "kind": "main-preview-container-candidate",
+  "repository": "example-owner/example-app",
+  "sourceRef": "refs/heads/main",
+  "sourceSha": "1111111111111111111111111111111111111111",
+  "runId": 1,
+  "runAttempt": 1,
+  "image": {
+    "repository": "ghcr.io/example-owner/example-app",
+    "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "chart": {
+    "repository": "ghcr.io/example-owner/charts/example-app",
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  }
+}
